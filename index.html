@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PitchBalancer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .dragging { opacity: 0.35; transform: scale(0.98); }
+    .drag-over { background-color: rgba(16, 185, 129, 0.08); border-color: #10b981 !important; }
+    .drag-target-player { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.1) !important; }
+    .touch-clone {
+      position: fixed;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.85;
+      transform: translate(-50%, -50%) scale(1.03);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+    
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 sm:mb-8 border-b border-slate-800">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-xl shadow-lg shadow-emerald-500/10 shrink-0">
+          ⚽
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight text-white">PitchBalancer</h1>
+          <p class="text-xs text-slate-400">Position, ability & coach squad balancer</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button onclick="openSyncModal()" class="px-3 py-1.5 text-xs font-semibold bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 rounded-lg hover:bg-indigo-600/30 hover:text-white transition flex items-center gap-1.5">
+          <span>🔄</span> Backup / Sync
+        </button>
+        <button onclick="resetToImportedDefault()" class="px-3 py-1.5 text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-800 hover:text-white transition">
+          Reset Default
+        </button>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
+      
+      <!-- Squad & Attendance Section -->
+      <section class="lg:col-span-5 flex flex-col gap-4">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+          
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-white">Squad Attendance</h2>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Attending: <span id="attending-count" class="font-bold text-emerald-400">0</span> / <span id="total-count">0</span>
+              </p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="toggleAllAttendance(true)" class="text-xs px-2.5 sm:px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition font-semibold">
+                ✓ All
+              </button>
+              <button onclick="toggleAllAttendance(false)" class="text-xs px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 rounded-lg transition font-medium">
+                ✕ None
+              </button>
+            </div>
+          </div>
+
+          <!-- Add Player -->
+          <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3 mb-4">
+            <span class="text-[11px] font-bold tracking-wider uppercase text-slate-400 block mb-2">Add Player</span>
+            <div class="flex gap-2 mb-2">
+              <input id="quick-name" type="text" placeholder="Name..." class="bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500 flex-1 min-w-0">
+              <input id="quick-rating" type="number" min="1" max="10" value="5" class="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1.5 text-sm text-center text-white w-14 focus:outline-none focus:border-emerald-500" title="Ability">
+              <button onclick="addQuickPlayer()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 rounded-lg transition shadow">Add</button>
+            </div>
+            <div class="mb-2">
+              <input id="quick-coach" type="text" placeholder="Coach/Dad (optional)..." class="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="flex flex-wrap gap-1" id="quick-add-tags"></div>
+          </div>
+
+          <!-- Search -->
+          <div class="mb-3">
+            <input id="player-search" oninput="renderSquadList()" type="text" placeholder="Search roster by name, coach, or tag..." class="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-slate-600">
+          </div>
+
+          <!-- List -->
+          <div id="players-container" class="space-y-2 max-h-[420px] sm:max-h-[500px] overflow-y-auto pr-1"></div>
+        </div>
+      </section>
+
+      <!-- Teams & Controls -->
+      <section class="lg:col-span-7 flex flex-col gap-5">
+        
+        <!-- Controls Bar -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-1 bg-slate-950 p-1 border border-slate-800 rounded-xl justify-center sm:justify-start">
+            <button onclick="setActiveView('detailed')" id="view-tab-detailed" class="flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition bg-emerald-600 text-white shadow">
+              Detailed
+            </button>
+            <button onclick="setActiveView('basic')" id="view-tab-basic" class="flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white">
+              Basic
+            </button>
+            <button onclick="setActiveView('whatsapp')" id="view-tab-whatsapp" class="flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white flex items-center justify-center gap-1">
+              <span>💬</span> WhatsApp
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2 justify-between sm:justify-end">
+            <div class="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+              <button onclick="setTeamCount(2)" id="btn-team-2" class="px-3 py-1 rounded-md text-xs font-bold transition bg-emerald-600 text-white shadow">2</button>
+              <button onclick="setTeamCount(3)" id="btn-team-3" class="px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white">3</button>
+              <button onclick="setTeamCount(4)" id="btn-team-4" class="px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white">4</button>
+            </div>
+            <button onclick="balanceTeams()" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-md transition">
+              ⚡ Re-pick
+            </button>
+          </div>
+        </div>
+
+        <!-- Output View Container -->
+        <div id="teams-output-container"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Mobile Transfer Modal -->
+  <div id="transfer-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <span>⇄</span> Move <span id="transfer-player-name" class="text-emerald-400 font-bold"></span>
+        </h3>
+        <button onclick="closeTransferModal()" class="text-slate-400 hover:text-white text-sm">✕</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-4">Select destination team:</p>
+      <div id="transfer-teams-list" class="space-y-2"></div>
+    </div>
+  </div>
+
+  <!-- Sync Modal -->
+  <div id="sync-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+        <div>
+          <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+            <span>🔄</span> Sync Squad Between Devices
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">Transfer between phone and PC</p>
+        </div>
+        <button onclick="closeSyncModal()" class="text-slate-400 hover:text-white text-sm">✕</button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs font-semibold uppercase text-slate-300 block mb-1">Squad Sync Code</label>
+          <textarea id="sync-json-textarea" rows="4" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl p-2.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-indigo-500"></textarea>
+          <div class="flex gap-2 mt-2">
+            <button onclick="copySyncCode()" class="flex-1 px-3 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded-lg text-xs font-semibold transition">
+              📋 Copy Code
+            </button>
+            <button onclick="importSyncCode()" class="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition shadow">
+              📥 Import
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 my-2">
+          <hr class="border-slate-800 flex-1">
+          <span class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">File Backup</span>
+          <hr class="border-slate-800 flex-1">
+        </div>
+
+        <div class="flex gap-2">
+          <button onclick="downloadRosterFile()" class="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition">
+            💾 Download File
+          </button>
+          <label class="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition text-center cursor-pointer">
+            📁 Upload File
+            <input type="file" id="sync-file-input" accept=".json" onchange="uploadRosterFile(event)" class="hidden">
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Player Modal -->
+  <div id="edit-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+        <h3 class="text-base font-bold text-white">Edit Player</h3>
+        <button onclick="closeEditModal()" class="text-slate-400 hover:text-white text-sm">✕</button>
+      </div>
+
+      <input type="hidden" id="modal-player-id">
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1">Name</label>
+          <input id="modal-player-name" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1">Coach / Dad</label>
+          <input id="modal-player-coach" type="text" placeholder="e.g. Mark, James, Ian, Craig" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1">Ability Rating (1 - 10)</label>
+          <input id="modal-player-rating" type="number" min="1" max="10" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1.5">Attributes</label>
+          <div class="flex flex-wrap gap-1" id="modal-player-tags"></div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 mt-5 pt-3 border-t border-slate-800">
+        <button onclick="closeEditModal()" class="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white rounded-lg transition">Cancel</button>
+        <button onclick="savePlayerEdit()" class="px-4 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow transition">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CORE_POSITIONS = ["Defender", "Midfield", "Winger", "Striker"];
+    const SECONDARY_TAGS = ["Goalkeeper", "Creative", "Tackler", "Development", "Pace"];
+    const ALL_TAGS = [...CORE_POSITIONS, ...SECONDARY_TAGS];
+
+    const TAG_COLORS = {
+      "Goalkeeper": "bg-amber-500/15 text-amber-300 border-amber-500/30",
+      "Defender": "bg-blue-500/15 text-blue-300 border-blue-500/30",
+      "Midfield": "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+      "Winger": "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+      "Striker": "bg-rose-500/15 text-rose-300 border-rose-500/30",
+      "Creative": "bg-purple-500/15 text-purple-300 border-purple-500/30",
+      "Tackler": "bg-orange-500/15 text-orange-300 border-orange-500/30",
+      "Development": "bg-pink-500/15 text-pink-300 border-pink-500/30",
+      "Pace": "bg-yellow-500/15 text-yellow-300 border-yellow-500/30"
+    };
+
+    // Default roster without Cayson (22 players)
+    const DEFAULT_ROSTER = [{"id":"p1","name":"Caiden","rating":7,"coach":null,"tags":["Goalkeeper","Midfield","Winger","Striker","Pace"],"attending":true},{"id":"p3","name":"Declan","rating":6,"coach":null,"tags":["Midfield","Winger","Striker"],"attending":true},{"id":"p4","name":"Dexter","rating":5,"coach":null,"tags":["Midfield","Winger","Striker"],"attending":true},{"id":"p5","name":"Esa","rating":7,"coach":null,"tags":["Winger","Striker","Pace"],"attending":true},{"id":"p6","name":"Finn","rating":9,"coach":"Ian","tags":["Winger","Striker","Pace"],"attending":true},{"id":"p7","name":"Griff","rating":1,"coach":null,"tags":["Winger","Striker","Development"],"attending":true},{"id":"p8","name":"Ishaaq","rating":6,"coach":null,"tags":["Defender","Midfield","Tackler"],"attending":true},{"id":"p9","name":"Jacob M","rating":5,"coach":null,"tags":["Defender","Midfield"],"attending":true},{"id":"p10","name":"Jacob P","rating":4,"coach":null,"tags":["Winger","Striker"],"attending":true},{"id":"p11","name":"Jake","rating":1,"coach":null,"tags":["Goalkeeper","Development"],"attending":true},{"id":"p12","name":"Jax","rating":9,"coach":"Mark","tags":["Defender","Midfield","Winger","Tackler"],"attending":true},{"id":"p13","name":"Jaylen","rating":1,"coach":null,"tags":["Striker","Development"],"attending":true},{"id":"p14","name":"Joydon","rating":6,"coach":null,"tags":["Defender","Tackler"],"attending":true},{"id":"p15","name":"Khalid","rating":1,"coach":null,"tags":["Striker","Development"],"attending":true},{"id":"p16","name":"Mason","rating":8,"coach":null,"tags":["Midfield","Winger","Striker","Pace"],"attending":true},{"id":"p17","name":"Mohammed","rating":1,"coach":null,"tags":["Midfield","Development"],"attending":true},{"id":"p18","name":"Noah","rating":3,"coach":null,"tags":["Winger","Striker","Development"],"attending":true},{"id":"p19","name":"Quinn","rating":7,"coach":"James","tags":["Goalkeeper","Defender","Midfield","Striker","Tackler"],"attending":true},{"id":"p20","name":"Rafa","rating":8,"coach":null,"tags":["Midfield","Winger","Creative"],"attending":true},{"id":"p21","name":"Sam","rating":1,"coach":null,"tags":["Goalkeeper","Development"],"attending":true},{"id":"p22","name":"Tommy","rating":8,"coach":"Craig","tags":["Defender","Midfield","Creative"],"attending":true},{"id":"p23","name":"Zac","rating":8,"coach":null,"tags":["Defender"],"attending":true}];
+
+    let players = [];
+    let numberOfTeams = 2;
+    let generatedTeams = [];
+    let currentView = 'detailed';
+    let quickSelectedTags = new Set();
+    let modalSelectedTags = new Set();
+    let draggedPlayerId = null;
+    let sourceTeamIndex = null;
+    let pendingTransferPlayer = null;
+
+    const TEAM_THEMES = [
+      { name: "Team 1", border: "border-emerald-500/40", pill: "bg-emerald-500", text: "text-emerald-400" },
+      { name: "Team 2", border: "border-sky-500/40", pill: "bg-sky-500", text: "text-sky-400" },
+      { name: "Team 3", border: "border-rose-500/40", pill: "bg-rose-500", text: "text-rose-400" },
+      { name: "Team 4", border: "border-amber-500/40", pill: "bg-amber-500", text: "text-amber-400" }
+    ];
+
+    function init() {
+      const saved = localStorage.getItem('pitchbalancer_players_v15');
+      if (saved) {
+        try { players = JSON.parse(saved); } catch(e) { players = [...DEFAULT_ROSTER]; }
+      } else {
+        players = [...DEFAULT_ROSTER];
+      }
+      renderQuickAddTags();
+      renderSquadList();
+      balanceTeams();
+      setupTouchDragAndDrop();
+    }
+
+    function savePlayers() {
+      localStorage.setItem('pitchbalancer_players_v15', JSON.stringify(players));
+    }
+
+    function resetToImportedDefault() {
+      if (confirm("Reset roster to original defaults (excluding Cayson)?")) {
+        players = JSON.parse(JSON.stringify(DEFAULT_ROSTER));
+        savePlayers();
+        renderSquadList();
+        balanceTeams();
+      }
+    }
+
+    // Sync Functions
+    function openSyncModal() {
+      document.getElementById('sync-json-textarea').value = JSON.stringify(players);
+      document.getElementById('sync-modal').classList.remove('hidden');
+    }
+    function closeSyncModal() { document.getElementById('sync-modal').classList.add('hidden'); }
+    function copySyncCode() {
+      navigator.clipboard.writeText(JSON.stringify(players)).then(() => {
+        alert("Roster code copied! Send via WhatsApp/notes to your other device.");
+      });
+    }
+    function importSyncCode() {
+      const val = document.getElementById('sync-json-textarea').value.trim();
+      if (!val) return;
+      try {
+        const imported = JSON.parse(val);
+        if (Array.isArray(imported)) {
+          players = imported;
+          savePlayers();
+          renderSquadList();
+          balanceTeams();
+          closeSyncModal();
+          alert(`Imported ${players.length} players!`);
+        }
+      } catch (err) { alert("Invalid code: " + err.message); }
+    }
+    function downloadRosterFile() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(players, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `pitchbalancer_${new Date().toISOString().slice(0,10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+    function uploadRosterFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (Array.isArray(imported)) {
+            players = imported;
+            savePlayers();
+            renderSquadList();
+            balanceTeams();
+            closeSyncModal();
+          }
+        } catch (err) { alert("Invalid JSON file."); }
+      };
+      reader.readAsText(file);
+    }
+
+    function setActiveView(view) {
+      currentView = view;
+      ['detailed', 'basic', 'whatsapp'].forEach(v => {
+        const tab = document.getElementById(`view-tab-${v}`);
+        if (v === view) {
+          tab.className = "flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition bg-emerald-600 text-white shadow";
+        } else {
+          tab.className = "flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white";
+        }
+      });
+      renderCurrentView();
+    }
+
+    function renderQuickAddTags() {
+      const container = document.getElementById('quick-add-tags');
+      container.innerHTML = ALL_TAGS.map(tag => {
+        const isSelected = quickSelectedTags.has(tag);
+        return `
+          <button type="button" onclick="toggleQuickTag('${tag}')" 
+                  class="text-[10px] px-2 py-0.5 rounded border transition ${isSelected ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 font-semibold' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'}">
+            ${isSelected ? '✓ ' : ''}${tag}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function toggleQuickTag(tag) {
+      if (quickSelectedTags.has(tag)) quickSelectedTags.delete(tag);
+      else quickSelectedTags.add(tag);
+      renderQuickAddTags();
+    }
+
+    function addQuickPlayer() {
+      const nameInput = document.getElementById('quick-name');
+      const ratingInput = document.getElementById('quick-rating');
+      const coachInput = document.getElementById('quick-coach');
+      const name = nameInput.value.trim();
+      const rating = parseInt(ratingInput.value, 10) || 5;
+      const coach = coachInput.value.trim() || null;
+
+      if (!name) return;
+
+      players.push({
+        id: 'p_' + Date.now(),
+        name,
+        coach,
+        rating: Math.max(1, Math.min(10, rating)),
+        tags: Array.from(quickSelectedTags),
+        attending: true
+      });
+
+      nameInput.value = '';
+      coachInput.value = '';
+      quickSelectedTags.clear();
+      renderQuickAddTags();
+      savePlayers();
+      renderSquadList();
+    }
+
+    function renderSquadList() {
+      const container = document.getElementById('players-container');
+      const searchTerm = (document.getElementById('player-search').value || '').toLowerCase();
+
+      const filtered = players.filter(p => {
+        const matchName = p.name.toLowerCase().includes(searchTerm);
+        const matchCoach = p.coach && p.coach.toLowerCase().includes(searchTerm);
+        const matchTag = p.tags && p.tags.some(t => t.toLowerCase().includes(searchTerm));
+        return matchName || matchCoach || matchTag;
+      });
+
+      document.getElementById('attending-count').textContent = players.filter(p => p.attending).length;
+      document.getElementById('total-count').textContent = players.length;
+
+      container.innerHTML = filtered.map(player => `
+        <div class="flex flex-col gap-1.5 p-2 rounded-xl border ${player.attending ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-950/20 border-slate-800/40 opacity-60'} hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <label class="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+              <input type="checkbox" ${player.attending ? 'checked' : ''} onchange="toggleAttendance('${player.id}')" class="h-4 w-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0 cursor-pointer">
+              <span class="text-sm font-medium text-slate-200 truncate">${escapeHtml(player.name)}</span>
+              ${player.coach ? `
+                <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-medium">
+                  👔 ${escapeHtml(player.coach)}
+                </span>
+              ` : ''}
+            </label>
+            <div class="flex items-center gap-1.5">
+              <span class="px-2 py-0.5 text-xs font-bold rounded-md bg-black border border-slate-700 text-slate-200">
+                ${player.rating}
+              </span>
+              <button onclick="openEditModal('${player.id}')" class="text-slate-400 hover:text-white text-xs px-1.5 py-1 rounded bg-slate-900 border border-slate-800">✏️</button>
+              <button onclick="removePlayer('${player.id}')" class="text-slate-600 hover:text-rose-400 text-xs px-1">✕</button>
+            </div>
+          </div>
+          ${player.tags && player.tags.length > 0 ? `
+            <div class="flex flex-wrap gap-1 pl-6">
+              ${player.tags.map(t => `
+                <span class="text-[9px] px-1.5 py-0.2 rounded border ${TAG_COLORS[t] || 'bg-slate-800 text-slate-300 border-slate-700'}">
+                  ${t}
+                </span>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `).join('');
+    }
+
+    function toggleAttendance(id) {
+      const p = players.find(x => x.id === id);
+      if (p) {
+        p.attending = !p.attending;
+        savePlayers();
+        renderSquadList();
+      }
+    }
+    function toggleAllAttendance(status) {
+      players.forEach(p => p.attending = status);
+      savePlayers();
+      renderSquadList();
+    }
+    function removePlayer(id) {
+      players = players.filter(p => p.id !== id);
+      savePlayers();
+      renderSquadList();
+    }
+
+    function openEditModal(id) {
+      const p = players.find(x => x.id === id);
+      if (!p) return;
+      document.getElementById('modal-player-id').value = p.id;
+      document.getElementById('modal-player-name').value = p.name;
+      document.getElementById('modal-player-coach').value = p.coach || '';
+      document.getElementById('modal-player-rating').value = p.rating;
+      modalSelectedTags = new Set(p.tags || []);
+      renderModalTags();
+      document.getElementById('edit-modal').classList.remove('hidden');
+    }
+    function closeEditModal() { document.getElementById('edit-modal').classList.add('hidden'); }
+    function renderModalTags() {
+      const container = document.getElementById('modal-player-tags');
+      container.innerHTML = ALL_TAGS.map(tag => {
+        const isSelected = modalSelectedTags.has(tag);
+        return `
+          <button type="button" onclick="toggleModalTag('${tag}')" 
+                  class="text-xs px-2.5 py-1 rounded-lg border transition ${isSelected ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 font-bold' : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'}">
+            ${isSelected ? '✓ ' : ''}${tag}
+          </button>
+        `;
+      }).join('');
+    }
+    function toggleModalTag(tag) {
+      if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
+      else modalSelectedTags.add(tag);
+      renderModalTags();
+    }
+    function savePlayerEdit() {
+      const id = document.getElementById('modal-player-id').value;
+      const p = players.find(x => x.id === id);
+      if (!p) return;
+      const name = document.getElementById('modal-player-name').value.trim();
+      const coach = document.getElementById('modal-player-coach').value.trim() || null;
+      const rating = parseInt(document.getElementById('modal-player-rating').value, 10) || 5;
+
+      if (!name) return;
+      p.name = name;
+      p.coach = coach;
+      p.rating = Math.max(1, Math.min(10, rating));
+      p.tags = Array.from(modalSelectedTags);
+      savePlayers();
+      renderSquadList();
+      closeEditModal();
+      balanceTeams();
+    }
+
+    function setTeamCount(count) {
+      numberOfTeams = count;
+      [2, 3, 4].forEach(n => {
+        const btn = document.getElementById(`btn-team-${n}`);
+        if (n === count) btn.className = "px-3 py-1 rounded-md text-xs font-bold transition bg-emerald-600 text-white shadow";
+        else btn.className = "px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white";
+      });
+      balanceTeams();
+    }
+
+    // 4-Tier Hierarchical Penalty Evaluation
+    function calculatePenalty(teams) {
+      let penalty = 0;
+      const counts = teams.map(t => t.players.length);
+      const minCount = Math.min(...counts);
+      const maxCount = Math.max(...counts);
+      if (maxCount - minCount > 1) penalty += (maxCount - minCount) * 1000000;
+
+      const scores = teams.map(t => t.players.reduce((sum, p) => sum + p.rating, 0));
+      penalty += (Math.max(...scores) - Math.min(...scores)) * 10000;
+
+      CORE_POSITIONS.forEach(pos => {
+        const pCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(pos)).length);
+        penalty += (Math.max(...pCounts) - Math.min(...pCounts)) * 300;
+      });
+
+      SECONDARY_TAGS.forEach(tag => {
+        const tCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(tag)).length);
+        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 50;
+      });
+
+      return penalty;
+    }
+
+    // Positional Hierarchy Sorting: GK -> DEF -> MID -> WIN -> STR
+    function getPositionalHierarchyRank(player) {
+      const tags = player.tags || [];
+      if (tags.includes("Goalkeeper")) return 1;
+      if (tags.includes("Defender")) return 2;
+      if (tags.includes("Midfield")) return 3;
+      if (tags.includes("Winger")) return 4;
+      if (tags.includes("Striker")) return 5;
+      return 6;
+    }
+
+    function sortTeamTactically(teamPlayers) {
+      return [...teamPlayers].sort((a, b) => {
+        const rankA = getPositionalHierarchyRank(a);
+        const rankB = getPositionalHierarchyRank(b);
+        if (rankA !== rankB) return rankA - rankB;
+        return b.rating - a.rating;
+      });
+    }
+
+    function balanceTeams() {
+      const pool = players.filter(p => p.attending);
+      if (pool.length < numberOfTeams) {
+        alert("Select at least " + numberOfTeams + " attending players.");
+        return;
+      }
+
+      const baseSize = Math.floor(pool.length / numberOfTeams);
+      const remainder = pool.length % numberOfTeams;
+      const targetSizes = Array.from({ length: numberOfTeams }, (_, i) => baseSize + (i < remainder ? 1 : 0));
+
+      const sortedPool = [...pool].sort((a, b) => b.rating - a.rating);
+      
+      let bestTeams = Array.from({ length: numberOfTeams }, (_, i) => {
+        const existing = generatedTeams[i];
+        return {
+          name: (existing && existing.name && !existing.name.startsWith("Team Bibs") && !existing.name.startsWith("Team Non-Bibs")) 
+                ? existing.name 
+                : `Team ${i + 1}`,
+          venue: existing ? existing.venue : `Pitch ${i + 1}`,
+          date: existing ? existing.date : "Saturday Morning",
+          meetTime: existing ? existing.meetTime : "09:30 AM (10:00 KO)",
+          players: []
+        };
+      });
+
+      sortedPool.forEach(player => {
+        const availableTeamIndices = bestTeams
+          .map((t, idx) => ({ idx, count: t.players.length, target: targetSizes[idx], sum: t.players.reduce((s, p) => s + p.rating, 0) }))
+          .filter(t => t.count < t.target);
+
+        availableTeamIndices.sort((a, b) => a.sum - b.sum);
+        bestTeams[availableTeamIndices[0].idx].players.push(player);
+      });
+
+      let currentPenalty = calculatePenalty(bestTeams);
+      let improved = true;
+      let iterations = 0;
+
+      while (improved && iterations < 250) {
+        improved = false;
+        iterations++;
+        for (let i = 0; i < bestTeams.length; i++) {
+          for (let j = i + 1; j < bestTeams.length; j++) {
+            const teamA = bestTeams[i];
+            const teamB = bestTeams[j];
+            for (let aIdx = 0; aIdx < teamA.players.length; aIdx++) {
+              for (let bIdx = 0; bIdx < teamB.players.length; bIdx++) {
+                const pA = teamA.players[aIdx];
+                const pB = teamB.players[bIdx];
+                teamA.players[aIdx] = pB;
+                teamB.players[bIdx] = pA;
+
+                const newPenalty = calculatePenalty(bestTeams);
+                if (newPenalty < currentPenalty) {
+                  currentPenalty = newPenalty;
+                  improved = true;
+                  break;
+                } else {
+                  teamA.players[aIdx] = pA;
+                  teamB.players[bIdx] = pB;
+                }
+              }
+              if (improved) break;
+            }
+            if (improved) break;
+          }
+          if (improved) break;
+        }
+      }
+
+      // Sort chosen teams into requested tactical hierarchy: GK -> DEF -> MID -> WIN -> STR
+      bestTeams.forEach(team => {
+        team.players = sortTeamTactically(team.players);
+      });
+
+      generatedTeams = bestTeams;
+      renderCurrentView();
+    }
+
+    function renderCurrentView() {
+      if (currentView === 'whatsapp') renderWhatsAppView();
+      else if (currentView === 'basic') renderBasicView();
+      else renderDetailedView();
+    }
+
+    function movePlayerOrder(teamIdx, playerIdx, direction) {
+      const team = generatedTeams[teamIdx];
+      if (!team) return;
+
+      const targetIdx = playerIdx + direction;
+      if (targetIdx < 0 || targetIdx >= team.players.length) return;
+
+      const [player] = team.players.splice(playerIdx, 1);
+      team.players.splice(targetIdx, 0, player);
+      renderCurrentView();
+    }
+
+    // 1. WHATSAPP VIEW
+    function renderWhatsAppView() {
+      const container = document.getElementById('teams-output-container');
+      container.innerHTML = `
+        <div class="bg-slate-900 border-2 border-slate-700/80 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          
+          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div>
+              <h3 class="text-sm font-bold text-white uppercase tracking-wider text-emerald-400">Match Day View</h3>
+              <p class="text-xs text-slate-400">Set individual venues & kick-off times per squad</p>
+            </div>
+            <button onclick="copyWhatsAppPost()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow transition text-xs flex items-center gap-1.5">
+              <span>📋</span> Copy All Details
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+            ${generatedTeams.map((team, tIdx) => {
+              const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
+              return `
+                <div class="bg-slate-950 border ${theme.border} rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-3">
+                  <div>
+                    <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800">
+                      <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full ${theme.pill}"></span>
+                        ${escapeHtml(team.name)}
+                      </h3>
+                      <span class="text-xs text-slate-400 font-medium">${team.players.length} players</span>
+                    </div>
+
+                    <div class="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2.5 space-y-2 mb-3">
+                      <div>
+                        <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">📍 Location / Pitch</label>
+                        <input type="text" value="${escapeHtml(team.venue || '')}" 
+                               oninput="updateTeamDetail(${tIdx}, 'venue', this.value)"
+                               placeholder="e.g. Pitch 2, Main Ground..."
+                               class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
+                      </div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <div>
+                          <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">📅 Date</label>
+                          <input type="text" value="${escapeHtml(team.date || '')}" 
+                                 oninput="updateTeamDetail(${tIdx}, 'date', this.value)"
+                                 placeholder="e.g. Sat 26th"
+                                 class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
+                        </div>
+                        <div>
+                          <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">⏰ Meet / Kick-off</label>
+                          <input type="text" value="${escapeHtml(team.meetTime || '')}" 
+                                 oninput="updateTeamDetail(${tIdx}, 'meetTime', this.value)"
+                                 placeholder="e.g. 09:30 Meet"
+                                 class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
+                        </div>
+                      </div>
+                    </div>
+
+                    <ul class="space-y-2 pl-1">
+                      ${team.players.map(p => `
+                        <li class="text-[20px] font-bold text-slate-100 flex items-center gap-2.5 leading-tight">
+                          <span class="${theme.text} text-base leading-none">•</span>
+                          <span>${escapeHtml(p.name)}</span>
+                        </li>
+                      `).join('')}
+                    </ul>
+                  </div>
+
+                  <button onclick="copySingleTeamWhatsApp(${tIdx})" class="w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 transition flex items-center justify-center gap-1">
+                    <span>📋</span> Copy Only ${escapeHtml(team.name)}
+                  </button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <p class="text-[11px] text-center text-slate-500 pt-2 border-t border-slate-800">
+            📸 Screengrab ready for WhatsApp parent groups.
+          </p>
+        </div>
+      `;
+    }
+
+    function updateTeamDetail(teamIdx, field, value) {
+      if (generatedTeams[teamIdx]) {
+        generatedTeams[teamIdx][field] = value;
+      }
+    }
+
+    // 2. BASIC VIEW
+    function renderBasicView() {
+      const container = document.getElementById('teams-output-container');
+      container.innerHTML = `
+        <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+          ${generatedTeams.map((team, tIdx) => {
+            const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
+            const coaches = team.players.filter(p => p.coach).map(p => p.coach);
+
+            return `
+              <div class="team-drop-zone bg-slate-900/90 border ${theme.border} rounded-2xl p-4 shadow-xl flex flex-col justify-between"
+                   data-team-index="${tIdx}"
+                   ondragover="handleDragOver(event)"
+                   ondragleave="handleDragLeave(event)"
+                   ondrop="handleDrop(event, ${tIdx})">
+                <div>
+                  <div class="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-2">
+                    <div>
+                      <input type="text" value="${escapeHtml(team.name)}" onchange="renameTeam(${tIdx}, this.value)"
+                             class="bg-transparent font-bold text-sm sm:text-base text-white hover:border-b border-dashed border-slate-600 focus:outline-none focus:border-solid focus:border-emerald-400">
+                      <div class="text-xs text-slate-400 mt-0.5">
+                        ${team.players.length} players
+                      </div>
+                    </div>
+                    <div class="h-3 w-3 rounded-full ${theme.pill}"></div>
+                  </div>
+
+                  <div class="mb-3 px-2.5 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Sideline Coaches</span>
+                    <span class="font-medium text-xs ${coaches.length > 0 ? 'text-indigo-300' : 'text-slate-500'}">
+                      ${coaches.length > 0 ? `👔 ${coaches.join(', ')}` : 'None'}
+                    </span>
+                  </div>
+
+                  <!-- Player Cards: Name and Coach Only -->
+                  <div class="space-y-2 min-h-[120px]">
+                    ${team.players.map((player, pIdx) => `
+                      <div draggable="true"
+                           data-player-id="${player.id}"
+                           data-player-index="${pIdx}"
+                           data-team-index="${tIdx}"
+                           ondragstart="handleDragStart(event, '${player.id}', ${tIdx})"
+                           ondragend="handleDragEnd(event)"
+                           class="touch-card flex items-center justify-between bg-slate-950/80 border border-slate-800 p-2.5 sm:p-3 rounded-xl cursor-grab active:cursor-grabbing hover:border-slate-700 transition shadow-sm select-none">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <div class="flex flex-col gap-0.5 shrink-0">
+                            <button onclick="movePlayerOrder(${tIdx}, ${pIdx}, -1)" ${pIdx === 0 ? 'disabled class="opacity-20 cursor-not-allowed"' : 'class="hover:text-emerald-400 text-slate-400 active:scale-110 transition"'} title="Move up">
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"></path></svg>
+                            </button>
+                            <button onclick="movePlayerOrder(${tIdx}, ${pIdx}, 1)" ${pIdx === team.players.length - 1 ? 'disabled class="opacity-20 cursor-not-allowed"' : 'class="hover:text-emerald-400 text-slate-400 active:scale-110 transition"'} title="Move down">
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg>
+                            </button>
+                          </div>
+
+                          <span class="text-[20px] font-bold text-white tracking-wide truncate leading-none">${escapeHtml(player.name)}</span>
+                          ${player.coach ? `
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-semibold shrink-0">
+                              👔 ${escapeHtml(player.coach)}
+                            </span>
+                          ` : ''}
+                        </div>
+
+                        <button onclick="openTransferModal('${player.id}', ${tIdx})" class="px-2.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 active:bg-emerald-600 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition shrink-0 font-bold" title="Transfer to another team">
+                          ⇄
+                        </button>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+                <p class="text-[10px] text-center text-slate-500 mt-4 border-t border-slate-800/40 pt-2">
+                  Use ▲ / ▼ or drag cards to reorder inside the team
+                </p>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // 3. DETAILED VIEW
+    function renderDetailedView() {
+      const container = document.getElementById('teams-output-container');
+      container.innerHTML = `
+        <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+          ${generatedTeams.map((team, tIdx) => {
+            const totalRating = team.players.reduce((acc, p) => acc + p.rating, 0);
+            const avgRating = team.players.length > 0 ? (totalRating / team.players.length).toFixed(1) : 0;
+            const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
+            const coaches = team.players.filter(p => p.coach).map(p => p.coach);
+
+            const defCount = team.players.filter(p => (p.tags || []).includes("Defender")).length;
+            const midCount = team.players.filter(p => (p.tags || []).includes("Midfield")).length;
+            const winCount = team.players.filter(p => (p.tags || []).includes("Winger")).length;
+            const strCount = team.players.filter(p => (p.tags || []).includes("Striker")).length;
+
+            return `
+              <div class="team-drop-zone bg-slate-900/90 border ${theme.border} rounded-2xl p-4 shadow-xl flex flex-col justify-between"
+                   data-team-index="${tIdx}"
+                   ondragover="handleDragOver(event)"
+                   ondragleave="handleDragLeave(event)"
+                   ondrop="handleDrop(event, ${tIdx})">
+                <div>
+                  <div class="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-2">
+                    <div>
+                      <input type="text" value="${escapeHtml(team.name)}" onchange="renameTeam(${tIdx}, this.value)"
+                             class="bg-transparent font-bold text-sm sm:text-base text-white hover:border-b border-dashed border-slate-600 focus:outline-none focus:border-solid focus:border-emerald-400">
+                      <div class="text-xs text-slate-400 mt-0.5">
+                        ${team.players.length} players &bull; Total: <span class="text-emerald-400 font-semibold">${totalRating}</span> &bull; Avg: <span class="text-slate-300">${avgRating}</span>
+                      </div>
+                    </div>
+                    <div class="h-3 w-3 rounded-full ${theme.pill}"></div>
+                  </div>
+
+                  <div class="mb-2 px-2 py-1.5 rounded-lg bg-slate-950/40 border border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>DEF: <b class="text-blue-300">${defCount}</b></span>
+                    <span>MID: <b class="text-emerald-300">${midCount}</b></span>
+                    <span>WIN: <b class="text-cyan-300">${winCount}</b></span>
+                    <span>STR: <b class="text-rose-300">${strCount}</b></span>
+                  </div>
+
+                  <div class="mb-3 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Sideline Coaches</span>
+                    <span class="font-medium text-xs ${coaches.length > 0 ? 'text-indigo-300' : 'text-slate-500'}">
+                      ${coaches.length > 0 ? `👔 ${coaches.join(', ')}` : 'None'}
+                    </span>
+                  </div>
+
+                  <div class="space-y-2 min-h-[120px]">
+                    ${team.players.map((player, pIdx) => `
+                      <div draggable="true"
+                           data-player-id="${player.id}"
+                           data-player-index="${pIdx}"
+                           data-team-index="${tIdx}"
+                           ondragstart="handleDragStart(event, '${player.id}', ${tIdx})"
+                           ondragend="handleDragEnd(event)"
+                           class="touch-card flex flex-col gap-1.5 bg-slate-950/80 border border-slate-800 p-2 sm:p-2.5 rounded-xl cursor-grab active:cursor-grabbing hover:border-slate-700 transition shadow-sm select-none">
+                        
+                        <div class="flex items-center justify-between">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <div class="flex flex-col gap-0.5 shrink-0">
+                              <button onclick="movePlayerOrder(${tIdx}, ${pIdx}, -1)" ${pIdx === 0 ? 'disabled class="opacity-20 cursor-not-allowed"' : 'class="hover:text-emerald-400 text-slate-400 active:scale-110 transition"'} title="Move up">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"></path></svg>
+                              </button>
+                              <button onclick="movePlayerOrder(${tIdx}, ${pIdx}, 1)" ${pIdx === team.players.length - 1 ? 'disabled class="opacity-20 cursor-not-allowed"' : 'class="hover:text-emerald-400 text-slate-400 active:scale-110 transition"'} title="Move down">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg>
+                              </button>
+                            </div>
+
+                            <span class="text-[19px] font-bold text-white tracking-wide truncate leading-none">${escapeHtml(player.name)}</span>
+                            ${player.coach ? `
+                              <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-medium shrink-0">
+                                👔 ${escapeHtml(player.coach)}
+                              </span>
+                            ` : ''}
+                          </div>
+
+                          <div class="flex items-center gap-1.5 shrink-0">
+                            <span class="px-2 py-0.5 text-xs font-bold rounded-md bg-black border border-slate-700 text-slate-200">
+                              ${player.rating}
+                            </span>
+                            <button onclick="openTransferModal('${player.id}', ${tIdx})" class="px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 active:bg-emerald-600 text-slate-300 rounded border border-slate-700" title="Transfer Player">
+                              ⇄
+                            </button>
+                          </div>
+                        </div>
+
+                        ${player.tags && player.tags.length > 0 ? `
+                          <div class="flex flex-wrap gap-1 pl-6">
+                            ${player.tags.map(t => `
+                              <span class="text-[9px] px-1.5 py-0.2 rounded border ${TAG_COLORS[t] || 'bg-slate-800 text-slate-300 border-slate-700'}">
+                                ${t}
+                              </span>
+                            `).join('')}
+                          </div>
+                        ` : ''}
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+                <p class="text-[10px] text-center text-slate-500 mt-4 border-t border-slate-800/40 pt-2">
+                  Use ▲ / ▼ or drag cards to reorder inside the team
+                </p>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function renameTeam(idx, newName) {
+      if (generatedTeams[idx]) generatedTeams[idx].name = newName;
+    }
+
+    // Transfer Modal
+    function openTransferModal(playerId, currentTeamIdx) {
+      pendingTransferPlayer = { playerId, currentTeamIdx };
+      let playerObj = null;
+      generatedTeams[currentTeamIdx].players.forEach(p => { if (p.id === playerId) playerObj = p; });
+      if (!playerObj) return;
+
+      document.getElementById('transfer-player-name').textContent = playerObj.name;
+      const listContainer = document.getElementById('transfer-teams-list');
+      
+      listContainer.innerHTML = generatedTeams.map((t, idx) => {
+        if (idx === currentTeamIdx) return '';
+        const theme = TEAM_THEMES[idx % TEAM_THEMES.length];
+        return `
+          <button onclick="executeTransfer(${idx})" class="w-full flex items-center justify-between p-3 rounded-xl bg-slate-950 border ${theme.border} hover:bg-slate-900 transition text-left">
+            <span class="text-sm font-semibold text-white flex items-center gap-2">
+              <span class="h-2 w-2 rounded-full ${theme.pill}"></span>
+              ${escapeHtml(t.name)}
+            </span>
+            <span class="text-xs text-slate-400 font-medium">Move here →</span>
+          </button>
+        `;
+      }).join('');
+
+      document.getElementById('transfer-modal').classList.remove('hidden');
+    }
+
+    function closeTransferModal() {
+      document.getElementById('transfer-modal').classList.add('hidden');
+      pendingTransferPlayer = null;
+    }
+
+    function executeTransfer(targetTeamIdx) {
+      if (!pendingTransferPlayer) return;
+      const { playerId, currentTeamIdx } = pendingTransferPlayer;
+      const sourceTeam = generatedTeams[currentTeamIdx];
+      const targetTeam = generatedTeams[targetTeamIdx];
+
+      const pIdx = sourceTeam.players.findIndex(p => p.id === playerId);
+      if (pIdx > -1) {
+        const [player] = sourceTeam.players.splice(pIdx, 1);
+        targetTeam.players.push(player);
+      }
+      closeTransferModal();
+      renderCurrentView();
+    }
+
+    // Touch Drag & Drop
+    let touchDraggingElement = null;
+    let touchClone = null;
+    let touchSourceTeam = null;
+
+    function setupTouchDragAndDrop() {
+      document.addEventListener('touchstart', function(e) {
+        const card = e.target.closest('.touch-card');
+        if (!card || e.target.closest('button') || e.target.closest('input')) return;
+        touchDraggingElement = card;
+        touchSourceTeam = parseInt(card.getAttribute('data-team-index'), 10);
+      }, { passive: true });
+
+      document.addEventListener('touchmove', function(e) {
+        if (!touchDraggingElement) return;
+        const touch = e.touches[0];
+        if (!touchClone) {
+          touchClone = touchDraggingElement.cloneNode(true);
+          touchClone.classList.add('touch-clone');
+          touchClone.style.width = touchDraggingElement.offsetWidth + 'px';
+          document.body.appendChild(touchClone);
+          touchDraggingElement.classList.add('dragging');
+        }
+
+        touchClone.style.left = touch.clientX + 'px';
+        touchClone.style.top = touch.clientY + 'px';
+
+        const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+        document.querySelectorAll('.team-drop-zone').forEach(el => el.classList.remove('drag-over'));
+        document.querySelectorAll('.touch-card').forEach(el => el.classList.remove('drag-target-player'));
+
+        if (elemBelow) {
+          const targetCard = elemBelow.closest('.touch-card');
+          if (targetCard && targetCard !== touchDraggingElement) {
+            targetCard.classList.add('drag-target-player');
+          } else {
+            const zone = elemBelow.closest('.team-drop-zone');
+            if (zone) zone.classList.add('drag-over');
+          }
+        }
+      }, { passive: false });
+
+      document.addEventListener('touchend', function(e) {
+        if (!touchDraggingElement) return;
+        if (touchClone) {
+          touchClone.remove();
+          touchClone = null;
+        }
+        touchDraggingElement.classList.remove('dragging');
+        document.querySelectorAll('.team-drop-zone').forEach(el => el.classList.remove('drag-over'));
+        document.querySelectorAll('.touch-card').forEach(el => el.classList.remove('drag-target-player'));
+
+        const touch = e.changedTouches[0];
+        const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (elemBelow) {
+          const targetCard = elemBelow.closest('.touch-card');
+          const targetZone = elemBelow.closest('.team-drop-zone');
+          const pId = touchDraggingElement.getAttribute('data-player-id');
+
+          if (targetCard && targetCard !== touchDraggingElement) {
+            const targetTeamIdx = parseInt(targetCard.getAttribute('data-team-index'), 10);
+            const targetPlayerIdx = parseInt(targetCard.getAttribute('data-player-index'), 10);
+            applyDropInsertion(touchSourceTeam, pId, targetTeamIdx, targetPlayerIdx);
+          } else if (targetZone) {
+            const targetTeamIdx = parseInt(targetZone.getAttribute('data-team-index'), 10);
+            if (!isNaN(targetTeamIdx) && targetTeamIdx !== touchSourceTeam) {
+              applyDropInsertion(touchSourceTeam, pId, targetTeamIdx, null);
+            }
+          }
+        }
+        touchDraggingElement = null;
+        touchSourceTeam = null;
+      });
+    }
+
+    // Mouse Drag & Drop
+    function handleDragStart(e, playerId, teamIdx) {
+      draggedPlayerId = playerId;
+      sourceTeamIndex = teamIdx;
+      e.target.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', playerId);
+    }
+    function handleDragEnd(e) {
+      e.target.classList.remove('dragging');
+      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('.drag-target-player').forEach(el => el.classList.remove('drag-target-player'));
+    }
+    function handleDragOver(e) {
+      e.preventDefault();
+      const card = e.target.closest('.touch-card');
+      document.querySelectorAll('.drag-target-player').forEach(el => el.classList.remove('drag-target-player'));
+      if (card && card.getAttribute('data-player-id') !== draggedPlayerId) {
+        card.classList.add('drag-target-player');
+      } else {
+        const dropZone = e.currentTarget;
+        if (!dropZone.classList.contains('drag-over')) dropZone.classList.add('drag-over');
+      }
+    }
+    function handleDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+      const card = e.target.closest('.touch-card');
+      if (card) card.classList.remove('drag-target-player');
+    }
+    function handleDrop(e, targetTeamIndex) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      document.querySelectorAll('.drag-target-player').forEach(el => el.classList.remove('drag-target-player'));
+
+      const targetCard = e.target.closest('.touch-card');
+      let targetPlayerIndex = null;
+      if (targetCard) {
+        targetPlayerIndex = parseInt(targetCard.getAttribute('data-player-index'), 10);
+      }
+
+      applyDropInsertion(sourceTeamIndex, draggedPlayerId, targetTeamIndex, targetPlayerIndex);
+    }
+
+    function applyDropInsertion(fromTeamIdx, pId, toTeamIdx, targetPlayerIdx) {
+      if (fromTeamIdx === null || isNaN(toTeamIdx)) return;
+
+      const sourceTeam = generatedTeams[fromTeamIdx];
+      const targetTeam = generatedTeams[toTeamIdx];
+      const fromIdx = sourceTeam.players.findIndex(p => p.id === pId);
+      if (fromIdx === -1) return;
+
+      const [player] = sourceTeam.players.splice(fromIdx, 1);
+
+      if (targetPlayerIdx !== null && !isNaN(targetPlayerIdx)) {
+        targetTeam.players.splice(targetPlayerIdx, 0, player);
+      } else {
+        targetTeam.players.push(player);
+      }
+
+      renderCurrentView();
+    }
+
+    function copyWhatsAppPost() {
+      if (!generatedTeams || generatedTeams.length === 0) return;
+      let text = `⚽ *MATCH DAY TEAMS & DETAILS* ⚽\n\n`;
+
+      generatedTeams.forEach((team) => {
+        text += `*${team.name}* (${team.players.length} players)\n`;
+        text += `📍 *Venue:* ${team.venue || 'TBC'}\n`;
+        text += `📅 *Date:* ${team.date || 'TBC'}\n`;
+        text += `⏰ *Meet Time:* ${team.meetTime || 'TBC'}\n`;
+        text += `*Squad:*\n`;
+        team.players.forEach(p => { text += `• ${p.name}\n`; });
+        text += `\n---------------------------\n\n`;
+      });
+
+      navigator.clipboard.writeText(text.trim()).then(() => {
+        alert("All match details and teams copied to clipboard!");
+      });
+    }
+
+    function copySingleTeamWhatsApp(tIdx) {
+      const team = generatedTeams[tIdx];
+      if (!team) return;
+
+      let text = `⚽ *MATCH DETAILS: ${team.name.toUpperCase()}* ⚽\n\n`;
+      text += `📍 *Venue:* ${team.venue || 'TBC'}\n`;
+      text += `📅 *Date:* ${team.date || 'TBC'}\n`;
+      text += `⏰ *Meet Time:* ${team.meetTime || 'TBC'}\n\n`;
+      text += `*Squad (${team.players.length} players):*\n`;
+      team.players.forEach(p => { text += `• ${p.name}\n`; });
+
+      navigator.clipboard.writeText(text.trim()).then(() => {
+        alert(`Copied lineup and details for ${team.name}!`);
+      });
+    }
+
+    function escapeHtml(string) {
+      const div = document.createElement('div');
+      div.textContent = string;
+      return div.innerHTML;
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

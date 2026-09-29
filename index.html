@@ -6,6 +6,11 @@
   <title>PitchBalancer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Firebase Compatibility Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
   <style>
     body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
     .dragging { opacity: 0.35; transform: scale(0.98); }
@@ -31,7 +36,10 @@
           ⚽
         </div>
         <div>
-          <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight text-white">PitchBalancer</h1>
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight text-white">PitchBalancer</h1>
+            <span id="sync-status" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">Connecting...</span>
+          </div>
           <p class="text-xs text-slate-400">Position, ability & coach squad balancer</p>
         </div>
       </div>
@@ -223,6 +231,26 @@
   </div>
 
   <script>
+    // Configured with your Firebase credentials
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2bb_gAELMxcD4b8Y6_FS7nKSfAnodhaw",
+      authDomain: "pitchbalancer-db.firebaseapp.com",
+      databaseURL: "https://pitchbalancer-db-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "pitchbalancer-db",
+      storageBucket: "pitchbalancer-db.firebasestorage.app",
+      messagingSenderId: "390593831860",
+      appId: "1:390593831860:web:8d978a93743eb8a171c8e1"
+    };
+
+    // Initialize Firebase Database
+    let db = null;
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+    } catch (e) {
+      console.error("Firebase init error:", e);
+    }
+
     const CORE_POSITIONS = ["Defender", "Midfield", "Winger", "Striker"];
     const SECONDARY_TAGS = ["Goalkeeper", "Creative", "Tackler", "Development", "Pace"];
     const ALL_TAGS = [...CORE_POSITIONS, ...SECONDARY_TAGS];
@@ -239,7 +267,6 @@
       "Pace": "bg-yellow-500/15 text-yellow-300 border-yellow-500/30"
     };
 
-    // Default roster without Cayson (22 players)
     const DEFAULT_ROSTER = [{"id":"p1","name":"Caiden","rating":7,"coach":null,"tags":["Goalkeeper","Midfield","Winger","Striker","Pace"],"attending":true},{"id":"p3","name":"Declan","rating":6,"coach":null,"tags":["Midfield","Winger","Striker"],"attending":true},{"id":"p4","name":"Dexter","rating":5,"coach":null,"tags":["Midfield","Winger","Striker"],"attending":true},{"id":"p5","name":"Esa","rating":7,"coach":null,"tags":["Winger","Striker","Pace"],"attending":true},{"id":"p6","name":"Finn","rating":9,"coach":"Ian","tags":["Winger","Striker","Pace"],"attending":true},{"id":"p7","name":"Griff","rating":1,"coach":null,"tags":["Winger","Striker","Development"],"attending":true},{"id":"p8","name":"Ishaaq","rating":7,"coach":null,"tags":["Defender","Midfield","Tackler"],"attending":true},{"id":"p9","name":"Jacob M","rating":5,"coach":null,"tags":["Defender","Midfield"],"attending":true},{"id":"p10","name":"Jacob P","rating":4,"coach":null,"tags":["Winger","Striker"],"attending":true},{"id":"p11","name":"Jake","rating":1,"coach":null,"tags":["Goalkeeper","Development"],"attending":true},{"id":"p12","name":"Jax","rating":9,"coach":"Mark","tags":["Defender","Midfield","Winger","Tackler"],"attending":true},{"id":"p13","name":"Jaylen","rating":1,"coach":null,"tags":["Striker","Development"],"attending":true},{"id":"p14","name":"Joydon","rating":6,"coach":null,"tags":["Defender","Tackler"],"attending":true},{"id":"p15","name":"Khalid","rating":1,"coach":null,"tags":["Striker","Development"],"attending":true},{"id":"p16","name":"Mason","rating":8,"coach":null,"tags":["Midfield","Winger","Striker","Pace"],"attending":true},{"id":"p17","name":"Mohammed","rating":1,"coach":null,"tags":["Midfield","Development"],"attending":true},{"id":"p18","name":"Noah","rating":3,"coach":null,"tags":["Winger","Striker","Development"],"attending":true},{"id":"p19","name":"Quinn","rating":7,"coach":"James","tags":["Goalkeeper","Defender","Midfield","Striker","Tackler"],"attending":true},{"id":"p20","name":"Rafa","rating":8,"coach":null,"tags":["Midfield","Winger","Creative"],"attending":true},{"id":"p21","name":"Sam","rating":1,"coach":null,"tags":["Goalkeeper","Development"],"attending":true},{"id":"p22","name":"Tommy","rating":8,"coach":"Craig","tags":["Defender","Midfield","Creative"],"attending":true},{"id":"p23","name":"Zac","rating":8,"coach":null,"tags":["Defender"],"attending":true}];
 
     let players = [];
@@ -260,24 +287,55 @@
     ];
 
     function init() {
-      const saved = localStorage.getItem('pitchbalancer_players_v15');
-      if (saved) {
-        try { players = JSON.parse(saved); } catch(e) { players = [...DEFAULT_ROSTER]; }
-      } else {
-        players = [...DEFAULT_ROSTER];
-      }
       renderQuickAddTags();
+      setupTouchDragAndDrop();
+
+      if (db) {
+        const syncBadge = document.getElementById('sync-status');
+        db.ref('pitchbalancer/roster').on('value', (snapshot) => {
+          const cloudData = snapshot.val();
+          if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
+            players = cloudData;
+          } else {
+            players = [...DEFAULT_ROSTER];
+            savePlayers();
+          }
+          if (syncBadge) {
+            syncBadge.textContent = '☁️ Live Cloud';
+            syncBadge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold';
+          }
+          renderSquadList();
+          balanceTeams();
+        }, (error) => {
+          console.warn("Falling back to local cache:", error);
+          loadLocalFallback();
+        });
+      } else {
+        loadLocalFallback();
+      }
+    }
+
+    function loadLocalFallback() {
+      const saved = localStorage.getItem('pitchbalancer_players_v15');
+      players = saved ? JSON.parse(saved) : [...DEFAULT_ROSTER];
+      const syncBadge = document.getElementById('sync-status');
+      if (syncBadge) {
+        syncBadge.textContent = '💾 Local Mode';
+        syncBadge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800 font-semibold';
+      }
       renderSquadList();
       balanceTeams();
-      setupTouchDragAndDrop();
     }
 
     function savePlayers() {
       localStorage.setItem('pitchbalancer_players_v15', JSON.stringify(players));
+      if (db) {
+        db.ref('pitchbalancer/roster').set(players);
+      }
     }
 
     function resetToImportedDefault() {
-      if (confirm("Reset roster to original defaults (excluding Cayson)?")) {
+      if (confirm("Reset roster to original defaults?")) {
         players = JSON.parse(JSON.stringify(DEFAULT_ROSTER));
         savePlayers();
         renderSquadList();
@@ -285,7 +343,6 @@
       }
     }
 
-    // Sync Functions
     function openSyncModal() {
       document.getElementById('sync-json-textarea').value = JSON.stringify(players);
       document.getElementById('sync-modal').classList.remove('hidden');
@@ -293,7 +350,7 @@
     function closeSyncModal() { document.getElementById('sync-modal').classList.add('hidden'); }
     function copySyncCode() {
       navigator.clipboard.writeText(JSON.stringify(players)).then(() => {
-        alert("Roster code copied! Send via WhatsApp/notes to your other device.");
+        alert("Roster code copied!");
       });
     }
     function importSyncCode() {
@@ -522,7 +579,6 @@
       balanceTeams();
     }
 
-    // 4-Tier Hierarchical Penalty Evaluation
     function calculatePenalty(teams) {
       let penalty = 0;
       const counts = teams.map(t => t.players.length);
@@ -546,7 +602,6 @@
       return penalty;
     }
 
-    // Positional Hierarchy Sorting: GK -> DEF -> MID -> WIN -> STR
     function getPositionalHierarchyRank(player) {
       const tags = player.tags || [];
       if (tags.includes("Goalkeeper")) return 1;
@@ -568,10 +623,7 @@
 
     function balanceTeams() {
       const pool = players.filter(p => p.attending);
-      if (pool.length < numberOfTeams) {
-        alert("Select at least " + numberOfTeams + " attending players.");
-        return;
-      }
+      if (pool.length < numberOfTeams) return;
 
       const baseSize = Math.floor(pool.length / numberOfTeams);
       const remainder = pool.length % numberOfTeams;
@@ -637,7 +689,6 @@
         }
       }
 
-      // Sort chosen teams into requested tactical hierarchy: GK -> DEF -> MID -> WIN -> STR
       bestTeams.forEach(team => {
         team.players = sortTeamTactically(team.players);
       });
@@ -664,12 +715,10 @@
       renderCurrentView();
     }
 
-    // 1. WHATSAPP VIEW
     function renderWhatsAppView() {
       const container = document.getElementById('teams-output-container');
       container.innerHTML = `
         <div class="bg-slate-900 border-2 border-slate-700/80 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
-          
           <div class="flex items-center justify-between pb-2 border-b border-slate-800">
             <div>
               <h3 class="text-sm font-bold text-white uppercase tracking-wider text-emerald-400">Match Day View</h3>
@@ -680,7 +729,7 @@
             </button>
           </div>
 
-          <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             ${generatedTeams.map((team, tIdx) => {
               const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
               return `
@@ -751,11 +800,10 @@
       }
     }
 
-    // 2. BASIC VIEW
     function renderBasicView() {
       const container = document.getElementById('teams-output-container');
       container.innerHTML = `
-        <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${generatedTeams.map((team, tIdx) => {
             const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
             const coaches = team.players.filter(p => p.coach).map(p => p.coach);
@@ -785,7 +833,6 @@
                     </span>
                   </div>
 
-                  <!-- Player Cards: Name and Coach Only -->
                   <div class="space-y-2 min-h-[120px]">
                     ${team.players.map((player, pIdx) => `
                       <div draggable="true"
@@ -830,11 +877,10 @@
       `;
     }
 
-    // 3. DETAILED VIEW
     function renderDetailedView() {
       const container = document.getElementById('teams-output-container');
       container.innerHTML = `
-        <div class="grid grid-cols-1 ${numberOfTeams > 2 ? 'md:grid-cols-2' : 'md:grid-cols-2'} gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${generatedTeams.map((team, tIdx) => {
             const totalRating = team.players.reduce((acc, p) => acc + p.rating, 0);
             const avgRating = team.players.length > 0 ? (totalRating / team.players.length).toFixed(1) : 0;
@@ -944,7 +990,6 @@
       if (generatedTeams[idx]) generatedTeams[idx].name = newName;
     }
 
-    // Transfer Modal
     function openTransferModal(playerId, currentTeamIdx) {
       pendingTransferPlayer = { playerId, currentTeamIdx };
       let playerObj = null;
@@ -991,7 +1036,6 @@
       renderCurrentView();
     }
 
-    // Touch Drag & Drop
     let touchDraggingElement = null;
     let touchClone = null;
     let touchSourceTeam = null;
@@ -1066,7 +1110,6 @@
       });
     }
 
-    // Mouse Drag & Drop
     function handleDragStart(e, playerId, teamIdx) {
       draggedPlayerId = playerId;
       sourceTeamIndex = teamIdx;

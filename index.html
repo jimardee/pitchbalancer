@@ -6,7 +6,7 @@
   <title>PitchBalancer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  
+
   <!-- Firebase Compatibility Scripts -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -29,7 +29,7 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
   <div class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
-    
+
     <!-- Header -->
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 sm:mb-8 border-b border-slate-800">
       <div class="flex items-center gap-3">
@@ -55,11 +55,11 @@
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
-      
+
       <!-- Squad & Attendance Section -->
       <section class="lg:col-span-5 flex flex-col gap-4">
         <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
-          
+
           <div class="flex items-center justify-between mb-4">
             <div>
               <h2 class="text-base sm:text-lg font-bold text-white">Squad Attendance</h2>
@@ -103,7 +103,7 @@
 
       <!-- Teams & Controls -->
       <section class="lg:col-span-7 flex flex-col gap-5">
-        
+
         <!-- Controls Bar -->
         <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div class="flex items-center gap-1 bg-slate-950 p-1 border border-slate-800 rounded-xl justify-center sm:justify-start">
@@ -219,7 +219,7 @@
           <input id="modal-player-rating" type="number" min="1" max="10" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
         </div>
         <div>
-          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1.5">Attributes</label>
+          <label class="text-xs font-semibold uppercase text-slate-400 block mb-1.5">Positions &amp; Attributes</label>
           <div class="flex flex-wrap gap-1" id="modal-player-tags"></div>
         </div>
       </div>
@@ -252,9 +252,67 @@
       console.error("Firebase init error:", e);
     }
 
-    const CORE_POSITIONS = ["Defender", "Midfield", "Winger", "Striker"];
-    const SECONDARY_TAGS = ["Goalkeeper", "Creative", "Tackler", "Development", "Pace"];
-    const ALL_TAGS = [...CORE_POSITIONS, ...SECONDARY_TAGS];
+    // Positions are stored in the player's tags in order of strength (first = strongest)
+    const POSITIONS = ["Goalkeeper", "Defender", "Midfield", "Winger", "Striker"];
+    const TRAITS = ["Creative", "Tackler", "Development", "Pace"];
+    const ALL_TAGS = [...POSITIONS, ...TRAITS];
+    const POSITION_SHORT = { Goalkeeper: "GK", Defender: "DEF", Midfield: "MID", Winger: "WIN", Striker: "STR" };
+    // How much a player counts towards a position: 1st choice full, 2nd most of it, and so on
+    const POSITION_WEIGHTS = [1, 0.6, 0.35, 0.2, 0.1];
+
+    function getPositions(player) {
+      return (player.tags || []).filter(t => POSITIONS.includes(t));
+    }
+    function getTraits(player) {
+      return (player.tags || []).filter(t => TRAITS.includes(t));
+    }
+    // Keep positions first (in the order chosen) then attributes
+    function orderedTags(selectedSet) {
+      const list = Array.from(selectedSet);
+      return [...list.filter(t => POSITIONS.includes(t)), ...list.filter(t => TRAITS.includes(t))];
+    }
+
+    function tagPickerHtml(selected, toggleFn, clearFn, large) {
+      const size = large ? 'text-xs px-2.5 py-1 rounded-lg' : 'text-[10px] px-2 py-0.5 rounded';
+      const order = Array.from(selected).filter(t => POSITIONS.includes(t));
+      const off = large ? 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700';
+      const on = 'bg-emerald-500/30 text-emerald-200 border-emerald-400 font-semibold';
+      const posButtons = POSITIONS.map(tag => {
+        const rank = order.indexOf(tag);
+        return `<button type="button" onclick="${toggleFn}('${tag}')" class="${size} border transition ${rank >= 0 ? on : off}">
+            ${rank >= 0 ? `<span class="inline-flex items-center justify-center h-4 w-4 rounded-full bg-emerald-500 text-white text-[9px] font-bold mr-0.5">${rank + 1}</span>` : ''}${tag}
+          </button>`;
+      }).join('');
+      const traitButtons = TRAITS.map(tag => {
+        const isSelected = selected.has(tag);
+        return `<button type="button" onclick="${toggleFn}('${tag}')" class="${size} border transition ${isSelected ? on : off}">
+            ${isSelected ? '✓ ' : ''}${tag}
+          </button>`;
+      }).join('');
+      return `
+        <div class="w-full flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
+          <span>Positions: tap in order, strongest first</span>
+          ${order.length ? `<button type="button" onclick="${clearFn}()" class="text-slate-500 hover:text-white underline">Clear positions</button>` : ''}
+        </div>
+        ${posButtons}
+        <div class="w-full text-[10px] text-slate-400 mt-1.5 mb-0.5">Attributes</div>
+        ${traitButtons}`;
+    }
+
+    function playerTagsHtml(player) {
+      const positions = getPositions(player);
+      const traits = getTraits(player);
+      if (positions.length === 0 && traits.length === 0) return '';
+      return `
+        <div class="flex flex-wrap gap-1 pl-6">
+          ${positions.map((t, i) => `
+            <span class="text-[9px] px-1.5 py-px rounded border ${TAG_COLORS[t]} ${i === 0 ? 'font-bold' : 'opacity-80'}" title="${i + 1}${['st','nd','rd'][i] || 'th'} choice">
+              ${i + 1}. ${t}
+            </span>`).join('')}
+          ${traits.map(t => `
+            <span class="text-[9px] px-1.5 py-px rounded border ${TAG_COLORS[t]}">${t}</span>`).join('')}
+        </div>`;
+    }
 
     const TAG_COLORS = {
       "Goalkeeper": "bg-amber-500/15 text-amber-300 border-amber-500/30",
@@ -451,20 +509,16 @@
 
     function renderQuickAddTags() {
       const container = document.getElementById('quick-add-tags');
-      container.innerHTML = ALL_TAGS.map(tag => {
-        const isSelected = quickSelectedTags.has(tag);
-        return `
-          <button type="button" onclick="toggleQuickTag('${tag}')" 
-                  class="text-[10px] px-2 py-0.5 rounded border transition ${isSelected ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 font-semibold' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'}">
-            ${isSelected ? '✓ ' : ''}${tag}
-          </button>
-        `;
-      }).join('');
+      container.innerHTML = tagPickerHtml(quickSelectedTags, 'toggleQuickTag', 'clearQuickPositions', false);
     }
 
     function toggleQuickTag(tag) {
       if (quickSelectedTags.has(tag)) quickSelectedTags.delete(tag);
       else quickSelectedTags.add(tag);
+      renderQuickAddTags();
+    }
+    function clearQuickPositions() {
+      POSITIONS.forEach(t => quickSelectedTags.delete(t));
       renderQuickAddTags();
     }
 
@@ -483,7 +537,7 @@
         name,
         coach,
         rating: Math.max(1, Math.min(10, rating)),
-        tags: Array.from(quickSelectedTags),
+        tags: orderedTags(quickSelectedTags),
         attending: true
       });
 
@@ -528,15 +582,7 @@
               <button onclick="removePlayer('${player.id}')" class="text-slate-600 hover:text-rose-400 text-xs px-1">✕</button>
             </div>
           </div>
-          ${player.tags && player.tags.length > 0 ? `
-            <div class="flex flex-wrap gap-1 pl-6">
-              ${player.tags.map(t => `
-                <span class="text-[9px] px-1.5 py-0.2 rounded border ${TAG_COLORS[t] || 'bg-slate-800 text-slate-300 border-slate-700'}">
-                  ${t}
-                </span>
-              `).join('')}
-            </div>
-          ` : ''}
+          ${playerTagsHtml(player)}
         </div>
       `).join('');
     }
@@ -575,19 +621,15 @@
     function closeEditModal() { document.getElementById('edit-modal').classList.add('hidden'); }
     function renderModalTags() {
       const container = document.getElementById('modal-player-tags');
-      container.innerHTML = ALL_TAGS.map(tag => {
-        const isSelected = modalSelectedTags.has(tag);
-        return `
-          <button type="button" onclick="toggleModalTag('${tag}')" 
-                  class="text-xs px-2.5 py-1 rounded-lg border transition ${isSelected ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 font-bold' : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'}">
-            ${isSelected ? '✓ ' : ''}${tag}
-          </button>
-        `;
-      }).join('');
+      container.innerHTML = tagPickerHtml(modalSelectedTags, 'toggleModalTag', 'clearModalPositions', true);
     }
     function toggleModalTag(tag) {
       if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
       else modalSelectedTags.add(tag);
+      renderModalTags();
+    }
+    function clearModalPositions() {
+      POSITIONS.forEach(t => modalSelectedTags.delete(t));
       renderModalTags();
     }
     function savePlayerEdit() {
@@ -602,7 +644,7 @@
       p.name = name;
       p.coach = coach;
       p.rating = Math.max(1, Math.min(10, rating));
-      p.tags = Array.from(modalSelectedTags);
+      p.tags = orderedTags(modalSelectedTags);
       closeEditModal();
       rosterChanged();
     }
@@ -627,16 +669,29 @@
       const scores = teams.map(t => t.players.reduce((sum, p) => sum + p.rating, 0));
       penalty += (Math.max(...scores) - Math.min(...scores)) * 10000;
 
-      CORE_POSITIONS.forEach(pos => {
-        const pCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(pos)).length);
-        penalty += (Math.max(...pCounts) - Math.min(...pCounts)) * 300;
+      POSITIONS.forEach(pos => {
+        const isKeeper = pos === "Goalkeeper";
+        // Position strength per team: 1st-choice players count fully, later choices count less
+        const cover = teams.map(t => t.players.reduce((sum, p) => {
+          const rank = getPositions(p).indexOf(pos);
+          return sum + (rank >= 0 ? (POSITION_WEIGHTS[rank] || 0.1) : 0);
+        }, 0));
+        penalty += (Math.max(...cover) - Math.min(...cover)) * (isKeeper ? 3000 : 1500);
+
+        // Every team needs someone for each position (as their 1st or 2nd choice;
+        // for goalkeeper, anyone willing to go in goal)
+        teams.forEach(t => {
+          const covered = t.players.some(p => {
+            const rank = getPositions(p).indexOf(pos);
+            return rank >= 0 && (isKeeper || rank <= 1);
+          });
+          if (!covered) penalty += 12000;
+        });
       });
 
-      SECONDARY_TAGS.forEach(tag => {
+      TRAITS.forEach(tag => {
         const tCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(tag)).length);
-        // Goalkeepers matter more than the other attributes: avoid two keepers on one team
-        const weight = tag === "Goalkeeper" ? 2000 : 50;
-        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * weight;
+        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 50;
       });
 
       // Spread the coaches' / dads' children so every team has someone on the sideline
@@ -650,14 +705,10 @@
       return penalty;
     }
 
+    // List each team keeper-first, then defenders, midfield, wingers, strikers (by 1st choice)
     function getPositionalHierarchyRank(player) {
-      const tags = player.tags || [];
-      if (tags.includes("Goalkeeper")) return 1;
-      if (tags.includes("Defender")) return 2;
-      if (tags.includes("Midfield")) return 3;
-      if (tags.includes("Winger")) return 4;
-      if (tags.includes("Striker")) return 5;
-      return 6;
+      const first = getPositions(player)[0];
+      return first ? POSITIONS.indexOf(first) : POSITIONS.length;
     }
 
     function sortTeamTactically(teamPlayers) {
@@ -761,7 +812,7 @@
       const attempts = [];
       for (let k = 0; k < 40; k++) attempts.push(buildTeamsAttempt(pool, targetSizes));
       const best = Math.min(...attempts.map(a => a.penalty));
-      const TOLERANCE = 3000; // never accepts a bigger ability gap than the best found
+      const TOLERANCE = 2000; // only picks line-ups almost as fair as the best found
 
       const currentSig = generatedTeams.length === numberOfTeams ? teamsSignature(generatedTeams) : null;
       const seen = new Set();
@@ -863,7 +914,7 @@
                     <div class="bg-slate-900/90 border border-slate-800/80 rounded-lg p-2.5 space-y-2 mb-3">
                       <div>
                         <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">📍 Location / Pitch</label>
-                        <input type="text" value="${escapeHtml(team.venue || '')}" 
+                        <input type="text" value="${escapeHtml(team.venue || '')}"
                                oninput="updateTeamDetail(${tIdx}, 'venue', this.value)"
                                placeholder="e.g. Pitch 2, Main Ground..."
                                class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
@@ -871,14 +922,14 @@
                       <div class="grid grid-cols-2 gap-2">
                         <div>
                           <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">📅 Date</label>
-                          <input type="text" value="${escapeHtml(team.date || '')}" 
+                          <input type="text" value="${escapeHtml(team.date || '')}"
                                  oninput="updateTeamDetail(${tIdx}, 'date', this.value)"
                                  placeholder="e.g. Sat 26th"
                                  class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
                         </div>
                         <div>
                           <label class="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">⏰ Meet / Kick-off</label>
-                          <input type="text" value="${escapeHtml(team.meetTime || '')}" 
+                          <input type="text" value="${escapeHtml(team.meetTime || '')}"
                                  oninput="updateTeamDetail(${tIdx}, 'meetTime', this.value)"
                                  placeholder="e.g. 09:30 Meet"
                                  class="w-full bg-slate-950 border border-slate-700/80 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium">
@@ -1005,10 +1056,7 @@
             const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
             const coaches = team.players.filter(p => p.coach).map(p => p.coach);
 
-            const defCount = team.players.filter(p => (p.tags || []).includes("Defender")).length;
-            const midCount = team.players.filter(p => (p.tags || []).includes("Midfield")).length;
-            const winCount = team.players.filter(p => (p.tags || []).includes("Winger")).length;
-            const strCount = team.players.filter(p => (p.tags || []).includes("Striker")).length;
+            const firstChoice = pos => team.players.filter(p => getPositions(p)[0] === pos).length;
 
             return `
               <div class="team-drop-zone bg-slate-900/90 border ${theme.border} rounded-2xl p-4 shadow-xl flex flex-col justify-between"
@@ -1028,11 +1076,12 @@
                     <div class="h-3 w-3 rounded-full ${theme.pill}"></div>
                   </div>
 
-                  <div class="mb-2 px-2 py-1.5 rounded-lg bg-slate-950/40 border border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
-                    <span>DEF: <b class="text-blue-300">${defCount}</b></span>
-                    <span>MID: <b class="text-emerald-300">${midCount}</b></span>
-                    <span>WIN: <b class="text-cyan-300">${winCount}</b></span>
-                    <span>STR: <b class="text-rose-300">${strCount}</b></span>
+                  <div class="mb-2 px-2 py-1.5 rounded-lg bg-slate-950/40 border border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400" title="Players whose 1st choice is each position">
+                    <span>GK: <b class="text-amber-300">${firstChoice("Goalkeeper")}</b></span>
+                    <span>DEF: <b class="text-blue-300">${firstChoice("Defender")}</b></span>
+                    <span>MID: <b class="text-emerald-300">${firstChoice("Midfield")}</b></span>
+                    <span>WIN: <b class="text-cyan-300">${firstChoice("Winger")}</b></span>
+                    <span>STR: <b class="text-rose-300">${firstChoice("Striker")}</b></span>
                   </div>
 
                   <div class="mb-3 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
@@ -1051,7 +1100,7 @@
                            ondragstart="handleDragStart(event, '${player.id}', ${tIdx})"
                            ondragend="handleDragEnd(event)"
                            class="touch-card flex flex-col gap-1.5 bg-slate-950/80 border border-slate-800 p-2 sm:p-2.5 rounded-xl cursor-grab active:cursor-grabbing hover:border-slate-700 transition shadow-sm select-none">
-                        
+
                         <div class="flex items-center justify-between">
                           <div class="flex items-center gap-2 min-w-0">
                             <div class="flex flex-col gap-0.5 shrink-0">
@@ -1081,15 +1130,7 @@
                           </div>
                         </div>
 
-                        ${player.tags && player.tags.length > 0 ? `
-                          <div class="flex flex-wrap gap-1 pl-6">
-                            ${player.tags.map(t => `
-                              <span class="text-[9px] px-1.5 py-0.2 rounded border ${TAG_COLORS[t] || 'bg-slate-800 text-slate-300 border-slate-700'}">
-                                ${t}
-                              </span>
-                            `).join('')}
-                          </div>
-                        ` : ''}
+                        ${playerTagsHtml(player)}
                       </div>
                     `).join('')}
                   </div>
@@ -1119,7 +1160,7 @@
 
       document.getElementById('transfer-player-name').textContent = playerObj.name;
       const listContainer = document.getElementById('transfer-teams-list');
-      
+
       listContainer.innerHTML = generatedTeams.map((t, idx) => {
         if (idx === currentTeamIdx) return '';
         const theme = TEAM_THEMES[idx % TEAM_THEMES.length];

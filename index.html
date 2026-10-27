@@ -643,6 +643,10 @@
       const coachCounts = teams.map(t => t.players.filter(p => p.coach).length);
       penalty += (Math.max(...coachCounts) - Math.min(...coachCounts)) * 3000;
 
+      // Rating-1 players are complete beginners: share them out as equally as possible
+      const beginnerCounts = teams.map(t => t.players.filter(p => p.rating === 1).length);
+      penalty += (Math.max(...beginnerCounts) - Math.min(...beginnerCounts)) * 8000;
+
       return penalty;
     }
 

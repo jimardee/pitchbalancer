@@ -86,7 +86,7 @@
               <button onclick="addQuickPlayer()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 rounded-lg transition shadow">Add</button>
             </div>
             <div class="mb-2">
-              <input id="quick-coach" type="text" placeholder="Coach/Dad (optional)..." class="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
+              <input id="quick-coach" type="text" placeholder="Coach/Dad (optional, e.g. Leon as backup)..." class="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
             </div>
             <div class="flex flex-wrap gap-1" id="quick-add-tags"></div>
           </div>
@@ -259,6 +259,36 @@
     const POSITION_SHORT = { Goalkeeper: "GK", Defender: "DEF", Midfield: "MID", Winger: "WIN", Striker: "STR" };
     // How much a player counts towards a position: 1st choice full, 2nd most of it, and so on
     const POSITION_WEIGHTS = [1, 0.6, 0.35, 0.2, 0.1];
+
+    // Coaches: each team plays at its own location and needs 2 coaches.
+    // Primary coaches are shared out first; anyone else entered as a coach (e.g. Leon, Karlos)
+    // is a backup who is only relied on when a team is short.
+    const PRIMARY_COACHES = ["Ian", "Mark", "James", "Craig"];
+    const COACHES_NEEDED = 2;
+    function isPrimaryCoach(name) {
+      return PRIMARY_COACHES.some(c => c.toLowerCase() === String(name).trim().toLowerCase());
+    }
+    // A coach only comes if their child is playing; siblings' dad counts once
+    function teamCoaches(team) {
+      const names = [...new Set(team.players.filter(p => p.coach).map(p => p.coach.trim()))];
+      return { primary: names.filter(isPrimaryCoach), backup: names.filter(n => !isPrimaryCoach(n)) };
+    }
+    function coachSummaryHtml(team) {
+      const { primary, backup } = teamCoaches(team);
+      const total = primary.length + backup.length;
+      const list = [...primary.map(escapeHtml), ...backup.map(n => `${escapeHtml(n)} <span class="text-slate-500">(backup)</span>`)].join(', ');
+      const warning = total === 0 ? '<span class="text-rose-400 font-semibold">⚠️ No coach</span>'
+        : total < COACHES_NEEDED ? '<span class="text-amber-400 font-semibold ml-1">⚠️ needs 1 more</span>' : '';
+      return `
+        <div class="mb-3 px-2.5 py-1.5 rounded-lg bg-slate-950/70 border ${total < COACHES_NEEDED ? 'border-amber-500/40' : 'border-slate-800'} flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-400 text-[10px] font-semibold uppercase tracking-wider shrink-0">Coaches</span>
+          <span class="font-medium text-xs text-indigo-300 text-right">${total > 0 ? `👔 ${list}` : ''}${warning}</span>
+        </div>`;
+    }
+    function coachNamesText(team) {
+      const { primary, backup } = teamCoaches(team);
+      return [...primary, ...backup].join(', ') || 'TBC';
+    }
 
     function getPositions(player) {
       return (player.tags || []).filter(t => POSITIONS.includes(t));
@@ -695,9 +725,16 @@
         penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 2500;
       });
 
-      // Spread the coaches' / dads' children so every team has someone on the sideline
-      const coachCounts = teams.map(t => t.players.filter(p => p.coach).length);
-      penalty += (Math.max(...coachCounts) - Math.min(...coachCounts)) * 3000;
+      // Coaches: every team must have a coach, and should have 2 (backups count towards this)
+      const coachInfo = teams.map(teamCoaches);
+      coachInfo.forEach(c => {
+        const total = c.primary.length + c.backup.length;
+        if (total === 0) penalty += 100000;          // a team with no coach can't play
+        else if (total < COACHES_NEEDED) penalty += 15000;
+      });
+      // Share the primary coaches out evenly before leaning on backups
+      const primaryCounts = coachInfo.map(c => c.primary.length);
+      penalty += (Math.max(...primaryCounts) - Math.min(...primaryCounts)) * 3000;
 
       // Beginners (rated 1, or tagged Development) have little effect on games: share them out equally
       const isBeginner = p => p.rating === 1 || (p.tags || []).includes("Development");
@@ -939,6 +976,7 @@
                       </div>
                     </div>
 
+                    ${coachSummaryHtml(team)}
                     <ul class="space-y-2 pl-1">
                       ${team.players.map(p => `
                         <li class="text-[20px] font-bold text-slate-100 flex items-center gap-2.5 leading-tight">
@@ -977,7 +1015,6 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${generatedTeams.map((team, tIdx) => {
             const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
-            const coaches = team.players.filter(p => p.coach).map(p => p.coach);
 
             return `
               <div class="team-drop-zone bg-slate-900/90 border ${theme.border} rounded-2xl p-4 shadow-xl flex flex-col justify-between"
@@ -997,12 +1034,7 @@
                     <div class="h-3 w-3 rounded-full ${theme.pill}"></div>
                   </div>
 
-                  <div class="mb-3 px-2.5 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
-                    <span class="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Sideline Coaches</span>
-                    <span class="font-medium text-xs ${coaches.length > 0 ? 'text-indigo-300' : 'text-slate-500'}">
-                      ${coaches.length > 0 ? `👔 ${coaches.join(', ')}` : 'None'}
-                    </span>
-                  </div>
+                  ${coachSummaryHtml(team)}
 
                   <div class="space-y-2 min-h-[120px]">
                     ${team.players.map((player, pIdx) => `
@@ -1056,7 +1088,6 @@
             const totalRating = team.players.reduce((acc, p) => acc + p.rating, 0);
             const avgRating = team.players.length > 0 ? (totalRating / team.players.length).toFixed(1) : 0;
             const theme = TEAM_THEMES[tIdx % TEAM_THEMES.length];
-            const coaches = team.players.filter(p => p.coach).map(p => p.coach);
 
             const firstChoice = pos => team.players.filter(p => getPositions(p)[0] === pos).length;
 
@@ -1086,12 +1117,7 @@
                     <span>STR: <b class="text-rose-300">${firstChoice("Striker")}</b></span>
                   </div>
 
-                  <div class="mb-3 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
-                    <span class="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Sideline Coaches</span>
-                    <span class="font-medium text-xs ${coaches.length > 0 ? 'text-indigo-300' : 'text-slate-500'}">
-                      ${coaches.length > 0 ? `👔 ${coaches.join(', ')}` : 'None'}
-                    </span>
-                  </div>
+                  ${coachSummaryHtml(team)}
 
                   <div class="space-y-2 min-h-[120px]">
                     ${team.players.map((player, pIdx) => `
@@ -1379,6 +1405,7 @@
         text += `📍 *Venue:* ${team.venue || 'TBC'}\n`;
         text += `📅 *Date:* ${team.date || 'TBC'}\n`;
         text += `⏰ *Meet Time:* ${team.meetTime || 'TBC'}\n`;
+        text += `👔 *Coaches:* ${coachNamesText(team)}\n`;
         text += `*Squad:*\n`;
         team.players.forEach(p => { text += `• ${p.name}\n`; });
         text += `\n---------------------------\n\n`;
@@ -1396,7 +1423,8 @@
       let text = `⚽ *MATCH DETAILS: ${team.name.toUpperCase()}* ⚽\n\n`;
       text += `📍 *Venue:* ${team.venue || 'TBC'}\n`;
       text += `📅 *Date:* ${team.date || 'TBC'}\n`;
-      text += `⏰ *Meet Time:* ${team.meetTime || 'TBC'}\n\n`;
+      text += `⏰ *Meet Time:* ${team.meetTime || 'TBC'}\n`;
+      text += `👔 *Coaches:* ${coachNamesText(team)}\n\n`;
       text += `*Squad (${team.players.length} players):*\n`;
       team.players.forEach(p => { text += `• ${p.name}\n`; });
 

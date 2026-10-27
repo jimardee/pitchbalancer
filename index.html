@@ -689,17 +689,19 @@
         });
       });
 
-      TRAITS.forEach(tag => {
+      // Share out Creative, Tackler and Pace players
+      ["Creative", "Tackler", "Pace"].forEach(tag => {
         const tCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(tag)).length);
-        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 50;
+        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 2500;
       });
 
       // Spread the coaches' / dads' children so every team has someone on the sideline
       const coachCounts = teams.map(t => t.players.filter(p => p.coach).length);
       penalty += (Math.max(...coachCounts) - Math.min(...coachCounts)) * 3000;
 
-      // Rating-1 players are complete beginners: share them out as equally as possible
-      const beginnerCounts = teams.map(t => t.players.filter(p => p.rating === 1).length);
+      // Beginners (rated 1, or tagged Development) have little effect on games: share them out equally
+      const isBeginner = p => p.rating === 1 || (p.tags || []).includes("Development");
+      const beginnerCounts = teams.map(t => t.players.filter(isBeginner).length);
       penalty += (Math.max(...beginnerCounts) - Math.min(...beginnerCounts)) * 8000;
 
       return penalty;

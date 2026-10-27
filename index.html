@@ -16,6 +16,7 @@
     .dragging { opacity: 0.35; transform: scale(0.98); }
     .drag-over { background-color: rgba(16, 185, 129, 0.08); border-color: #10b981 !important; }
     .drag-target-player { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.1) !important; }
+    .touch-card { -webkit-touch-callout: none; }
     .touch-clone {
       position: fixed;
       pointer-events: none;
@@ -291,21 +292,23 @@
       setupTouchDragAndDrop();
 
       if (db) {
-        const syncBadge = document.getElementById('sync-status');
+        let firstLoad = true;
         db.ref('pitchbalancer/roster').on('value', (snapshot) => {
-          const cloudData = snapshot.val();
-          if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
-            players = cloudData;
+          const cloudPlayers = normalizePlayers(snapshot.val());
+          if (cloudPlayers.length > 0) {
+            players = cloudPlayers;
           } else {
-            players = [...DEFAULT_ROSTER];
+            players = JSON.parse(JSON.stringify(DEFAULT_ROSTER));
             savePlayers();
           }
-          if (syncBadge) {
-            syncBadge.textContent = '☁️ Live Cloud';
-            syncBadge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold';
-          }
+          setSyncBadge('cloud');
           renderSquadList();
-          balanceTeams();
+          if (firstLoad) {
+            firstLoad = false;
+            balanceTeams();
+          } else {
+            syncTeamsWithRoster();
+          }
         }, (error) => {
           console.warn("Falling back to local cache:", error);
           loadLocalFallback();
@@ -315,31 +318,73 @@
       }
     }
 
-    function loadLocalFallback() {
-      const saved = localStorage.getItem('pitchbalancer_players_v15');
-      players = saved ? JSON.parse(saved) : [...DEFAULT_ROSTER];
+    function setSyncBadge(mode) {
       const syncBadge = document.getElementById('sync-status');
-      if (syncBadge) {
-        syncBadge.textContent = '💾 Local Mode';
-        syncBadge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800 font-semibold';
-      }
+      if (!syncBadge) return;
+      const styles = {
+        cloud: ['☁️ Live Cloud', 'bg-emerald-950 text-emerald-300 border-emerald-800'],
+        local: ['💾 Local Mode', 'bg-amber-950 text-amber-300 border-amber-800'],
+        error: ['⚠️ Not saved to cloud', 'bg-rose-950 text-rose-300 border-rose-800']
+      };
+      const [text, cls] = styles[mode];
+      syncBadge.textContent = text;
+      syncBadge.className = `text-[10px] px-2 py-0.5 rounded-full border font-semibold ${cls}`;
+    }
+
+    // Tidy up any roster data (from the cloud, a sync code or a file) so the app can't break on it
+    function normalizePlayers(data) {
+      if (!data) return [];
+      const list = Array.isArray(data) ? data : Object.values(data);
+      return list
+        .filter(p => p && typeof p.name === 'string' && p.name.trim())
+        .map((p, i) => ({
+          id: p.id ? String(p.id) : `p_${Date.now()}_${i}`,
+          name: p.name.trim(),
+          rating: Math.max(1, Math.min(10, parseInt(p.rating, 10) || 5)),
+          coach: typeof p.coach === 'string' && p.coach.trim() ? p.coach.trim() : null,
+          tags: Array.isArray(p.tags) ? p.tags.filter(t => ALL_TAGS.includes(t)) : [],
+          attending: p.attending !== false
+        }));
+    }
+
+    function loadLocalFallback() {
+      let saved = [];
+      try { saved = normalizePlayers(JSON.parse(localStorage.getItem('pitchbalancer_players_v15'))); } catch (e) {}
+      players = saved.length > 0 ? saved : JSON.parse(JSON.stringify(DEFAULT_ROSTER));
+      setSyncBadge('local');
       renderSquadList();
       balanceTeams();
     }
 
     function savePlayers() {
-      localStorage.setItem('pitchbalancer_players_v15', JSON.stringify(players));
+      try { localStorage.setItem('pitchbalancer_players_v15', JSON.stringify(players)); } catch (e) {}
       if (db) {
-        db.ref('pitchbalancer/roster').set(players);
+        db.ref('pitchbalancer/roster').set(players)
+          .then(() => setSyncBadge('cloud'))
+          .catch(err => {
+            console.warn("Cloud save failed:", err);
+            setSyncBadge('error');
+          });
       }
     }
 
+    // Use after an edit to the squad: keeps the current teams and just updates them
+    function rosterChanged() {
+      savePlayers();
+      renderSquadList();
+      syncTeamsWithRoster();
+    }
+
+    function replaceRoster(newPlayers) {
+      players = newPlayers;
+      savePlayers();
+      renderSquadList();
+      balanceTeams();
+    }
+
     function resetToImportedDefault() {
-      if (confirm("Reset roster to original defaults?")) {
-        players = JSON.parse(JSON.stringify(DEFAULT_ROSTER));
-        savePlayers();
-        renderSquadList();
-        balanceTeams();
+      if (confirm("Reset roster to original defaults? This changes the squad on every device.")) {
+        replaceRoster(JSON.parse(JSON.stringify(DEFAULT_ROSTER)));
       }
     }
 
@@ -357,15 +402,12 @@
       const val = document.getElementById('sync-json-textarea').value.trim();
       if (!val) return;
       try {
-        const imported = JSON.parse(val);
-        if (Array.isArray(imported)) {
-          players = imported;
-          savePlayers();
-          renderSquadList();
-          balanceTeams();
-          closeSyncModal();
-          alert(`Imported ${players.length} players!`);
-        }
+        const imported = normalizePlayers(JSON.parse(val));
+        if (imported.length === 0) { alert("That code doesn't contain any players."); return; }
+        if (!confirm(`Replace the squad with these ${imported.length} players on every device?`)) return;
+        replaceRoster(imported);
+        closeSyncModal();
+        alert(`Imported ${imported.length} players!`);
       } catch (err) { alert("Invalid code: " + err.message); }
     }
     function downloadRosterFile() {
@@ -383,17 +425,15 @@
       const reader = new FileReader();
       reader.onload = function(e) {
         try {
-          const imported = JSON.parse(e.target.result);
-          if (Array.isArray(imported)) {
-            players = imported;
-            savePlayers();
-            renderSquadList();
-            balanceTeams();
-            closeSyncModal();
-          }
+          const imported = normalizePlayers(JSON.parse(e.target.result));
+          if (imported.length === 0) { alert("That file doesn't contain any players."); return; }
+          if (!confirm(`Replace the squad with these ${imported.length} players on every device?`)) return;
+          replaceRoster(imported);
+          closeSyncModal();
         } catch (err) { alert("Invalid JSON file."); }
       };
       reader.readAsText(file);
+      event.target.value = '';
     }
 
     function setActiveView(view) {
@@ -451,8 +491,7 @@
       coachInput.value = '';
       quickSelectedTags.clear();
       renderQuickAddTags();
-      savePlayers();
-      renderSquadList();
+      rosterChanged();
     }
 
     function renderSquadList() {
@@ -506,19 +545,20 @@
       const p = players.find(x => x.id === id);
       if (p) {
         p.attending = !p.attending;
-        savePlayers();
-        renderSquadList();
+        rosterChanged();
       }
     }
     function toggleAllAttendance(status) {
       players.forEach(p => p.attending = status);
       savePlayers();
       renderSquadList();
+      balanceTeams();
     }
     function removePlayer(id) {
-      players = players.filter(p => p.id !== id);
-      savePlayers();
-      renderSquadList();
+      const p = players.find(x => x.id === id);
+      if (!p || !confirm(`Remove ${p.name} from the squad on every device?`)) return;
+      players = players.filter(x => x.id !== id);
+      rosterChanged();
     }
 
     function openEditModal(id) {
@@ -563,10 +603,8 @@
       p.coach = coach;
       p.rating = Math.max(1, Math.min(10, rating));
       p.tags = Array.from(modalSelectedTags);
-      savePlayers();
-      renderSquadList();
       closeEditModal();
-      balanceTeams();
+      rosterChanged();
     }
 
     function setTeamCount(count) {
@@ -596,8 +634,14 @@
 
       SECONDARY_TAGS.forEach(tag => {
         const tCounts = teams.map(t => t.players.filter(p => (p.tags || []).includes(tag)).length);
-        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * 50;
+        // Goalkeepers matter more than the other attributes: avoid two keepers on one team
+        const weight = tag === "Goalkeeper" ? 2000 : 50;
+        penalty += (Math.max(...tCounts) - Math.min(...tCounts)) * weight;
       });
+
+      // Spread the coaches' / dads' children so every team has someone on the sideline
+      const coachCounts = teams.map(t => t.players.filter(p => p.coach).length);
+      penalty += (Math.max(...coachCounts) - Math.min(...coachCounts)) * 3000;
 
       return penalty;
     }
@@ -621,83 +665,152 @@
       });
     }
 
+    // ---- Team details (names, venues, dates) are remembered on this device ----
+    const TEAM_DETAILS_KEY = 'pitchbalancer_team_details_v1';
+    let teamDetails = [];
+    try { teamDetails = JSON.parse(localStorage.getItem(TEAM_DETAILS_KEY)) || []; } catch (e) { teamDetails = []; }
+
+    function getTeamDetails(i) {
+      const d = teamDetails[i] || {};
+      return {
+        name: d.name || `Team ${i + 1}`,
+        venue: d.venue !== undefined ? d.venue : `Pitch ${i + 1}`,
+        date: d.date !== undefined ? d.date : "Saturday Morning",
+        meetTime: d.meetTime !== undefined ? d.meetTime : "09:30 AM (10:00 KO)"
+      };
+    }
+
+    function saveTeamDetail(i, field, value) {
+      teamDetails[i] = { ...getTeamDetails(i), ...(teamDetails[i] || {}), [field]: value };
+      try { localStorage.setItem(TEAM_DETAILS_KEY, JSON.stringify(teamDetails)); } catch (e) {}
+    }
+
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // One attempt: share players out (strongest first, with a little randomness), then keep
+    // swapping pairs between teams while that makes the teams fairer.
+    function buildTeamsAttempt(pool, targetSizes) {
+      const teams = targetSizes.map(() => ({ players: [] }));
+      const order = shuffle([...pool]).sort((a, b) => (b.rating + Math.random() * 1.5) - (a.rating + Math.random() * 1.5));
+
+      order.forEach(player => {
+        const open = teams
+          .map((t, idx) => ({ idx, count: t.players.length, sum: t.players.reduce((s, p) => s + p.rating, 0) }))
+          .filter(t => t.count < targetSizes[t.idx]);
+        open.sort((a, b) => a.sum - b.sum || Math.random() - 0.5);
+        teams[open[0].idx].players.push(player);
+      });
+
+      let currentPenalty = calculatePenalty(teams);
+      let improved = true;
+      let iterations = 0;
+      while (improved && iterations < 250) {
+        improved = false;
+        iterations++;
+        outer:
+        for (let i = 0; i < teams.length; i++) {
+          for (let j = i + 1; j < teams.length; j++) {
+            const A = teams[i].players, B = teams[j].players;
+            for (let a = 0; a < A.length; a++) {
+              for (let b = 0; b < B.length; b++) {
+                const pA = A[a], pB = B[b];
+                A[a] = pB; B[b] = pA;
+                const newPenalty = calculatePenalty(teams);
+                if (newPenalty < currentPenalty) {
+                  currentPenalty = newPenalty;
+                  improved = true;
+                  break outer;
+                }
+                A[a] = pA; B[b] = pB;
+              }
+            }
+          }
+        }
+      }
+      return { teams, penalty: currentPenalty };
+    }
+
+    function teamsSignature(teams) {
+      return teams.map(t => t.players.map(p => p.id).sort().join(',')).sort().join('|');
+    }
+
+    // Re-pick: try lots of fair line-ups and choose one of the best at random,
+    // avoiding the line-up already on screen where possible.
     function balanceTeams() {
       const pool = players.filter(p => p.attending);
-      if (pool.length < numberOfTeams) return;
+      if (pool.length < numberOfTeams) {
+        generatedTeams = [];
+        renderCurrentView();
+        return;
+      }
 
       const baseSize = Math.floor(pool.length / numberOfTeams);
       const remainder = pool.length % numberOfTeams;
       const targetSizes = Array.from({ length: numberOfTeams }, (_, i) => baseSize + (i < remainder ? 1 : 0));
 
-      const sortedPool = [...pool].sort((a, b) => b.rating - a.rating);
-      
-      let bestTeams = Array.from({ length: numberOfTeams }, (_, i) => {
-        const existing = generatedTeams[i];
-        return {
-          name: (existing && existing.name && !existing.name.startsWith("Team Bibs") && !existing.name.startsWith("Team Non-Bibs")) 
-                ? existing.name 
-                : `Team ${i + 1}`,
-          venue: existing ? existing.venue : `Pitch ${i + 1}`,
-          date: existing ? existing.date : "Saturday Morning",
-          meetTime: existing ? existing.meetTime : "09:30 AM (10:00 KO)",
-          players: []
-        };
+      const attempts = [];
+      for (let k = 0; k < 40; k++) attempts.push(buildTeamsAttempt(pool, targetSizes));
+      const best = Math.min(...attempts.map(a => a.penalty));
+      const TOLERANCE = 3000; // never accepts a bigger ability gap than the best found
+
+      const currentSig = generatedTeams.length === numberOfTeams ? teamsSignature(generatedTeams) : null;
+      const seen = new Set();
+      let candidates = attempts.filter(a => {
+        if (a.penalty > best + TOLERANCE) return false;
+        const sig = teamsSignature(a.teams);
+        if (seen.has(sig)) return false;
+        seen.add(sig);
+        return true;
       });
+      const fresh = candidates.filter(a => teamsSignature(a.teams) !== currentSig);
+      if (fresh.length > 0) candidates = fresh;
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
 
-      sortedPool.forEach(player => {
-        const availableTeamIndices = bestTeams
-          .map((t, idx) => ({ idx, count: t.players.length, target: targetSizes[idx], sum: t.players.reduce((s, p) => s + p.rating, 0) }))
-          .filter(t => t.count < t.target);
+      generatedTeams = chosen.teams.map((t, i) => ({
+        ...getTeamDetails(i),
+        players: sortTeamTactically(t.players)
+      }));
+      renderCurrentView();
+    }
 
-        availableTeamIndices.sort((a, b) => a.sum - b.sum);
-        bestTeams[availableTeamIndices[0].idx].players.push(player);
-      });
-
-      let currentPenalty = calculatePenalty(bestTeams);
-      let improved = true;
-      let iterations = 0;
-
-      while (improved && iterations < 250) {
-        improved = false;
-        iterations++;
-        for (let i = 0; i < bestTeams.length; i++) {
-          for (let j = i + 1; j < bestTeams.length; j++) {
-            const teamA = bestTeams[i];
-            const teamB = bestTeams[j];
-            for (let aIdx = 0; aIdx < teamA.players.length; aIdx++) {
-              for (let bIdx = 0; bIdx < teamB.players.length; bIdx++) {
-                const pA = teamA.players[aIdx];
-                const pB = teamB.players[bIdx];
-                teamA.players[aIdx] = pB;
-                teamB.players[bIdx] = pA;
-
-                const newPenalty = calculatePenalty(bestTeams);
-                if (newPenalty < currentPenalty) {
-                  currentPenalty = newPenalty;
-                  improved = true;
-                  break;
-                } else {
-                  teamA.players[aIdx] = pA;
-                  teamB.players[bIdx] = pB;
-                }
-              }
-              if (improved) break;
-            }
-            if (improved) break;
-          }
-          if (improved) break;
-        }
+    // When the squad changes (attendance ticked, player edited, change from another phone),
+    // update the existing teams instead of re-picking, so manual moves are kept.
+    function syncTeamsWithRoster() {
+      const attending = players.filter(p => p.attending);
+      if (generatedTeams.length !== numberOfTeams || attending.length < numberOfTeams) {
+        balanceTeams();
+        return;
       }
-
-      bestTeams.forEach(team => {
-        team.players = sortTeamTactically(team.players);
+      const byId = new Map(attending.map(p => [p.id, p]));
+      const placed = new Set();
+      generatedTeams.forEach(team => {
+        team.players = team.players.filter(p => byId.has(p.id)).map(p => byId.get(p.id));
+        team.players.forEach(p => placed.add(p.id));
       });
-
-      generatedTeams = bestTeams;
+      attending.filter(p => !placed.has(p.id)).forEach(p => {
+        const target = [...generatedTeams].sort((a, b) =>
+          a.players.length - b.players.length ||
+          a.players.reduce((s, x) => s + x.rating, 0) - b.players.reduce((s, x) => s + x.rating, 0)
+        )[0];
+        target.players.push(p);
+      });
       renderCurrentView();
     }
 
     function renderCurrentView() {
+      if (generatedTeams.length === 0) {
+        document.getElementById('teams-output-container').innerHTML = `
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-400">
+            Tick at least ${numberOfTeams} attending players to pick teams.
+          </div>`;
+        return;
+      }
       if (currentView === 'whatsapp') renderWhatsAppView();
       else if (currentView === 'basic') renderBasicView();
       else renderDetailedView();
@@ -797,6 +910,7 @@
     function updateTeamDetail(teamIdx, field, value) {
       if (generatedTeams[teamIdx]) {
         generatedTeams[teamIdx][field] = value;
+        saveTeamDetail(teamIdx, field, value);
       }
     }
 
@@ -868,7 +982,7 @@
                   </div>
                 </div>
                 <p class="text-[10px] text-center text-slate-500 mt-4 border-t border-slate-800/40 pt-2">
-                  Use ▲ / ▼ or drag cards to reorder inside the team
+                  Use ▲ / ▼ to reorder · drag a card (press and hold on a phone) or tap ⇄ to move teams
                 </p>
               </div>
             `;
@@ -977,7 +1091,7 @@
                   </div>
                 </div>
                 <p class="text-[10px] text-center text-slate-500 mt-4 border-t border-slate-800/40 pt-2">
-                  Use ▲ / ▼ or drag cards to reorder inside the team
+                  Use ▲ / ▼ to reorder · drag a card (press and hold on a phone) or tap ⇄ to move teams
                 </p>
               </div>
             `;
@@ -987,7 +1101,10 @@
     }
 
     function renameTeam(idx, newName) {
-      if (generatedTeams[idx]) generatedTeams[idx].name = newName;
+      if (generatedTeams[idx]) {
+        generatedTeams[idx].name = newName;
+        saveTeamDetail(idx, 'name', newName);
+      }
     }
 
     function openTransferModal(playerId, currentTeamIdx) {
@@ -1036,36 +1153,71 @@
       renderCurrentView();
     }
 
+    // Phone dragging: press and hold a player card for a moment, then drag.
+    // A normal swipe still scrolls the page.
+    let touchCandidate = null;
     let touchDraggingElement = null;
     let touchClone = null;
     let touchSourceTeam = null;
+    let touchHoldTimer = null;
+    let touchStartPoint = null;
+    const HOLD_MS = 300;
+
+    function clearTouchHighlights() {
+      document.querySelectorAll('.team-drop-zone').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('.touch-card').forEach(el => el.classList.remove('drag-target-player'));
+    }
+
+    function cancelTouchDrag() {
+      clearTimeout(touchHoldTimer);
+      touchHoldTimer = null;
+      if (touchClone) { touchClone.remove(); touchClone = null; }
+      if (touchDraggingElement) touchDraggingElement.classList.remove('dragging');
+      clearTouchHighlights();
+      touchCandidate = null;
+      touchDraggingElement = null;
+      touchSourceTeam = null;
+    }
 
     function setupTouchDragAndDrop() {
       document.addEventListener('touchstart', function(e) {
         const card = e.target.closest('.touch-card');
-        if (!card || e.target.closest('button') || e.target.closest('input')) return;
-        touchDraggingElement = card;
-        touchSourceTeam = parseInt(card.getAttribute('data-team-index'), 10);
-      }, { passive: true });
-
-      document.addEventListener('touchmove', function(e) {
-        if (!touchDraggingElement) return;
+        if (!card || e.target.closest('button') || e.target.closest('input') || e.touches.length > 1) return;
         const touch = e.touches[0];
-        if (!touchClone) {
+        touchCandidate = card;
+        touchStartPoint = { x: touch.clientX, y: touch.clientY };
+        clearTimeout(touchHoldTimer);
+        touchHoldTimer = setTimeout(() => {
+          if (!touchCandidate) return;
+          touchDraggingElement = touchCandidate;
+          touchSourceTeam = parseInt(touchDraggingElement.getAttribute('data-team-index'), 10);
           touchClone = touchDraggingElement.cloneNode(true);
           touchClone.classList.add('touch-clone');
           touchClone.style.width = touchDraggingElement.offsetWidth + 'px';
+          touchClone.style.left = touchStartPoint.x + 'px';
+          touchClone.style.top = touchStartPoint.y + 'px';
           document.body.appendChild(touchClone);
           touchDraggingElement.classList.add('dragging');
-        }
+          if (navigator.vibrate) navigator.vibrate(15);
+        }, HOLD_MS);
+      }, { passive: true });
 
+      document.addEventListener('touchmove', function(e) {
+        const touch = e.touches[0];
+        if (!touchDraggingElement) {
+          // Moved before the hold finished: it's a scroll, not a drag
+          if (touchCandidate && touchStartPoint &&
+              Math.hypot(touch.clientX - touchStartPoint.x, touch.clientY - touchStartPoint.y) > 10) {
+            cancelTouchDrag();
+          }
+          return;
+        }
+        e.preventDefault(); // stop the page scrolling while dragging
         touchClone.style.left = touch.clientX + 'px';
         touchClone.style.top = touch.clientY + 'px';
 
         const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-        document.querySelectorAll('.team-drop-zone').forEach(el => el.classList.remove('drag-over'));
-        document.querySelectorAll('.touch-card').forEach(el => el.classList.remove('drag-target-player'));
-
+        clearTouchHighlights();
         if (elemBelow) {
           const targetCard = elemBelow.closest('.touch-card');
           if (targetCard && targetCard !== touchDraggingElement) {
@@ -1078,35 +1230,36 @@
       }, { passive: false });
 
       document.addEventListener('touchend', function(e) {
-        if (!touchDraggingElement) return;
-        if (touchClone) {
-          touchClone.remove();
-          touchClone = null;
-        }
-        touchDraggingElement.classList.remove('dragging');
-        document.querySelectorAll('.team-drop-zone').forEach(el => el.classList.remove('drag-over'));
-        document.querySelectorAll('.touch-card').forEach(el => el.classList.remove('drag-target-player'));
-
+        if (!touchDraggingElement) { cancelTouchDrag(); return; }
         const touch = e.changedTouches[0];
+        const dragged = touchDraggingElement;
+        const fromTeam = touchSourceTeam;
+        if (touchClone) touchClone.style.display = 'none';
         const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+        cancelTouchDrag();
+
         if (elemBelow) {
           const targetCard = elemBelow.closest('.touch-card');
           const targetZone = elemBelow.closest('.team-drop-zone');
-          const pId = touchDraggingElement.getAttribute('data-player-id');
+          const pId = dragged.getAttribute('data-player-id');
 
-          if (targetCard && targetCard !== touchDraggingElement) {
+          if (targetCard && targetCard !== dragged) {
             const targetTeamIdx = parseInt(targetCard.getAttribute('data-team-index'), 10);
             const targetPlayerIdx = parseInt(targetCard.getAttribute('data-player-index'), 10);
-            applyDropInsertion(touchSourceTeam, pId, targetTeamIdx, targetPlayerIdx);
+            applyDropInsertion(fromTeam, pId, targetTeamIdx, targetPlayerIdx);
           } else if (targetZone) {
             const targetTeamIdx = parseInt(targetZone.getAttribute('data-team-index'), 10);
-            if (!isNaN(targetTeamIdx) && targetTeamIdx !== touchSourceTeam) {
-              applyDropInsertion(touchSourceTeam, pId, targetTeamIdx, null);
+            if (!isNaN(targetTeamIdx) && targetTeamIdx !== fromTeam) {
+              applyDropInsertion(fromTeam, pId, targetTeamIdx, null);
             }
           }
         }
-        touchDraggingElement = null;
-        touchSourceTeam = null;
+      });
+
+      document.addEventListener('touchcancel', cancelTouchDrag);
+      // Stop the phone's long-press menu appearing on player cards
+      document.addEventListener('contextmenu', function(e) {
+        if (e.target.closest('.touch-card')) e.preventDefault();
       });
     }
 

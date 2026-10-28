@@ -120,6 +120,7 @@
 
           <div class="flex items-center gap-2 justify-between sm:justify-end">
             <div class="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+              <button onclick="setTeamCount(1)" id="btn-team-1" class="px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white">1</button>
               <button onclick="setTeamCount(2)" id="btn-team-2" class="px-3 py-1 rounded-md text-xs font-bold transition bg-emerald-600 text-white shadow">2</button>
               <button onclick="setTeamCount(3)" id="btn-team-3" class="px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white">3</button>
               <button onclick="setTeamCount(4)" id="btn-team-4" class="px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white">4</button>
@@ -681,7 +682,7 @@
 
     function setTeamCount(count) {
       numberOfTeams = count;
-      [2, 3, 4].forEach(n => {
+      [1, 2, 3, 4].forEach(n => {
         const btn = document.getElementById(`btn-team-${n}`);
         if (n === count) btn.className = "px-3 py-1 rounded-md text-xs font-bold transition bg-emerald-600 text-white shadow";
         else btn.className = "px-3 py-1 rounded-md text-xs font-bold transition text-slate-400 hover:text-white";
@@ -901,7 +902,7 @@
       if (generatedTeams.length === 0) {
         document.getElementById('teams-output-container').innerHTML = `
           <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-400">
-            Tick at least ${numberOfTeams} attending players to pick teams.
+            Tick at least ${numberOfTeams} attending player${numberOfTeams > 1 ? 's' : ''} to pick ${numberOfTeams > 1 ? 'teams' : 'a team'}.
           </div>`;
         return;
       }
@@ -1187,6 +1188,7 @@
       document.getElementById('transfer-player-name').textContent = playerObj.name;
       const listContainer = document.getElementById('transfer-teams-list');
 
+      if (generatedTeams.length < 2) { alert("There's only one team. Pick 2 or more teams to move players between them."); return; }
       listContainer.innerHTML = generatedTeams.map((t, idx) => {
         if (idx === currentTeamIdx) return '';
         const theme = TEAM_THEMES[idx % TEAM_THEMES.length];
